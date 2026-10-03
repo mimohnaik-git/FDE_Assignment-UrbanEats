@@ -1,0 +1,773 @@
+{
+  "phase": "3B.1",
+  "audit_before": [
+    {
+      "path": ".dockerignore",
+      "bytes": 126
+    },
+    {
+      "path": ".env.example",
+      "bytes": 549
+    },
+    {
+      "path": ".gitignore",
+      "bytes": 262
+    },
+    {
+      "path": "AUDIT.md",
+      "bytes": 27624
+    },
+    {
+      "path": "pyproject.toml",
+      "bytes": 704
+    },
+    {
+      "path": "README.md",
+      "bytes": 16412
+    },
+    {
+      "path": "requirements-dev.txt",
+      "bytes": 161
+    },
+    {
+      "path": "requirements.txt",
+      "bytes": 580
+    },
+    {
+      "path": "urbaneats_alerts.json",
+      "bytes": 7611
+    },
+    {
+      "path": "UrbanEats_classifier_langchain.ipynb",
+      "bytes": 55908
+    },
+    {
+      "path": "urbaneats_delivery_orders.csv",
+      "bytes": 10491
+    },
+    {
+      "path": "urbaneats_delivery_orders_scored.csv",
+      "bytes": 11930
+    },
+    {
+      "path": "UrbanEats_n8n_workflow.json",
+      "bytes": 13262
+    },
+    {
+      "path": "urbaneats_ops_brief.md",
+      "bytes": 1843
+    },
+    {
+      "path": "UrbanEats_profiling_gx.ipynb",
+      "bytes": 118580
+    },
+    {
+      "path": "data/current_batch.json",
+      "bytes": 6722
+    },
+    {
+      "path": "docker/compose.yaml",
+      "bytes": 1417
+    },
+    {
+      "path": "docker/runtime.Dockerfile",
+      "bytes": 663
+    },
+    {
+      "path": "docs/EVALUATION.md",
+      "bytes": 3428
+    },
+    {
+      "path": "docs/FEATURE_CONTRACT.md",
+      "bytes": 3915
+    },
+    {
+      "path": "docs/LIVE_AUTOMATION.md",
+      "bytes": 19167
+    },
+    {
+      "path": "docs/N8N_SETUP.md",
+      "bytes": 237
+    },
+    {
+      "path": "docs/PHASE3B_REPORT.md",
+      "bytes": 6311
+    },
+    {
+      "path": "docs/PHASE3_REPORT.md",
+      "bytes": 19061
+    },
+    {
+      "path": "docs/REMEDIATION_PLAN.md",
+      "bytes": 14549
+    },
+    {
+      "path": "docs/RUNTIME.md",
+      "bytes": 6558
+    },
+    {
+      "path": "evaluation/evaluate.py",
+      "bytes": 8274
+    },
+    {
+      "path": "evaluation/__init__.py",
+      "bytes": 71
+    },
+    {
+      "path": "scripts/build_outage_workflow.py",
+      "bytes": 8646
+    },
+    {
+      "path": "scripts/current_demo.py",
+      "bytes": 1331
+    },
+    {
+      "path": "scripts/phase3_smoke.py",
+      "bytes": 1839
+    },
+    {
+      "path": "scripts/sanitize_legacy_workflow.py",
+      "bytes": 1300
+    },
+    {
+      "path": "scripts/security_scan.py",
+      "bytes": 3088
+    },
+    {
+      "path": "scripts/smoke_test.py",
+      "bytes": 1581
+    },
+    {
+      "path": "scripts/verify_notification_integration.py",
+      "bytes": 13490
+    },
+    {
+      "path": "scripts/verify_outage_integration.py",
+      "bytes": 179
+    },
+    {
+      "path": "tests/conftest.py",
+      "bytes": 703
+    },
+    {
+      "path": "tests/test_evaluation.py",
+      "bytes": 894
+    },
+    {
+      "path": "tests/test_live.py",
+      "bytes": 6107
+    },
+    {
+      "path": "tests/test_model.py",
+      "bytes": 2141
+    },
+    {
+      "path": "tests/test_notification.py",
+      "bytes": 6993
+    },
+    {
+      "path": "tests/test_outage.py",
+      "bytes": 7534
+    },
+    {
+      "path": "tests/test_runtime.py",
+      "bytes": 8864
+    },
+    {
+      "path": "tests/test_scaffold.py",
+      "bytes": 866
+    },
+    {
+      "path": "artifacts/model/feature_contract.json",
+      "bytes": 865
+    },
+    {
+      "path": "artifacts/model/metadata.json",
+      "bytes": 925
+    },
+    {
+      "path": "artifacts/model/pipeline.joblib",
+      "bytes": 4807
+    },
+    {
+      "path": "artifacts/model/threshold.json",
+      "bytes": 742
+    },
+    {
+      "path": "data/processed/.gitkeep",
+      "bytes": 0
+    },
+    {
+      "path": "data/raw/README.md",
+      "bytes": 150
+    },
+    {
+      "path": "docker/local/phase3_before_3a.json",
+      "bytes": 47532
+    },
+    {
+      "path": "docker/local/summarize-duplicate.js",
+      "bytes": 571
+    },
+    {
+      "path": "docker/local/summarize-retry.js",
+      "bytes": 684
+    },
+    {
+      "path": "docker/local/summarize.js",
+      "bytes": 849
+    },
+    {
+      "path": "docker/local/verify-n8n.sh",
+      "bytes": 472
+    },
+    {
+      "path": "docker/local/verify-retry.sh",
+      "bytes": 435
+    },
+    {
+      "path": "docker/local/workflow_retry.json",
+      "bytes": 28859
+    },
+    {
+      "path": "docker/local/workflow_test.json",
+      "bytes": 22411
+    },
+    {
+      "path": "docker/local/fixtures/failure.json",
+      "bytes": 2
+    },
+    {
+      "path": "docker/local/fixtures/green.json",
+      "bytes": 1109
+    },
+    {
+      "path": "docker/local/fixtures/red.json",
+      "bytes": 5229
+    },
+    {
+      "path": "docker/local/phase3a/dns.json",
+      "bytes": 150527
+    },
+    {
+      "path": "docker/local/phase3a/healthy.json",
+      "bytes": 150531
+    },
+    {
+      "path": "docker/local/phase3a/http500.json",
+      "bytes": 150532
+    },
+    {
+      "path": "docker/local/phase3a/http503.json",
+      "bytes": 150532
+    },
+    {
+      "path": "docker/local/phase3a/initialize_cli.cjs",
+      "bytes": 300
+    },
+    {
+      "path": "docker/local/phase3a/malformed.json",
+      "bytes": 150542
+    },
+    {
+      "path": "docker/local/phase3a/mock_transport.py",
+      "bytes": 886
+    },
+    {
+      "path": "docker/local/phase3a/native_failure.log",
+      "bytes": 108552
+    },
+    {
+      "path": "docker/local/phase3a/prior_red_body.json",
+      "bytes": 150549
+    },
+    {
+      "path": "docker/local/phase3a/recovery.json",
+      "bytes": 150533
+    },
+    {
+      "path": "docker/local/phase3a/refused.json",
+      "bytes": 150528
+    },
+    {
+      "path": "docker/local/phase3a/stopped_api.json",
+      "bytes": 150539
+    },
+    {
+      "path": "docker/local/phase3a/summarize.cjs",
+      "bytes": 1490
+    },
+    {
+      "path": "docker/local/phase3a/timeout.json",
+      "bytes": 150535
+    },
+    {
+      "path": "docker/local/phase3b/build_phase3a.py",
+      "bytes": 11462
+    },
+    {
+      "path": "docker/local/phase3b/data_failure.json",
+      "bytes": 94221
+    },
+    {
+      "path": "docker/local/phase3b/dns.json",
+      "bytes": 94207
+    },
+    {
+      "path": "docker/local/phase3b/green.json",
+      "bytes": 94207
+    },
+    {
+      "path": "docker/local/phase3b/healthy.json",
+      "bytes": 94211
+    },
+    {
+      "path": "docker/local/phase3b/http500.json",
+      "bytes": 94212
+    },
+    {
+      "path": "docker/local/phase3b/http503.json",
+      "bytes": 94212
+    },
+    {
+      "path": "docker/local/phase3b/initialize_cli.cjs",
+      "bytes": 300
+    },
+    {
+      "path": "docker/local/phase3b/malformed.json",
+      "bytes": 94222
+    },
+    {
+      "path": "docker/local/phase3b/mock_retry.json",
+      "bytes": 93938
+    },
+    {
+      "path": "docker/local/phase3b/mock_transport.py",
+      "bytes": 886
+    },
+    {
+      "path": "docker/local/phase3b/mock_unknown.json",
+      "bytes": 93870
+    },
+    {
+      "path": "docker/local/phase3b/phase3a.json",
+      "bytes": 189306
+    },
+    {
+      "path": "docker/local/phase3b/prior_red_body.json",
+      "bytes": 94229
+    },
+    {
+      "path": "docker/local/phase3b/public.json",
+      "bytes": 79916
+    },
+    {
+      "path": "docker/local/phase3b/recovery.json",
+      "bytes": 94213
+    },
+    {
+      "path": "docker/local/phase3b/refused.json",
+      "bytes": 94208
+    },
+    {
+      "path": "docker/local/phase3b/stopped_api.json",
+      "bytes": 94219
+    },
+    {
+      "path": "docker/local/phase3b/summarize.cjs",
+      "bytes": 1620
+    },
+    {
+      "path": "docker/local/phase3b/timeout.json",
+      "bytes": 94215
+    },
+    {
+      "path": "docker/local/phase3b/verify_phase3a.py",
+      "bytes": 10371
+    },
+    {
+      "path": "docker/local/retryruns/UE-253f737a2caa44b497e75ebf4ab6e5db.json",
+      "bytes": 13392
+    },
+    {
+      "path": "docker/local/retryruns/UE-4fc74e8049a6470bad29bb017bcb591e.json",
+      "bytes": 13392
+    },
+    {
+      "path": "docker/local/retryruns/UE-98b23226fd1349129151d362636271a3.json",
+      "bytes": 13392
+    },
+    {
+      "path": "docker/local/retryruns/delivery/21db58b1e2ce494d860d52445abf679d.json",
+      "bytes": 371
+    },
+    {
+      "path": "docker/local/retryruns/delivery/27fad85268744b0392b26fbc33c4aee1.json",
+      "bytes": 369
+    },
+    {
+      "path": "docker/local/retryruns/delivery/2b2bdc08e7de4c8fbc4578b6f9efd8e6.json",
+      "bytes": 381
+    },
+    {
+      "path": "docker/local/retryruns/delivery/335d26b5313fdfb2d71b5103637afd5d96255f89dde3a143d4ec50c9480bd3f8.claim",
+      "bytes": 35
+    },
+    {
+      "path": "docker/local/retryruns/delivery/4e457950e2cd4991aacab027745eb61f.json",
+      "bytes": 371
+    },
+    {
+      "path": "docker/local/retryruns/delivery/529a57066ab84c3b92011fa01785398c.json",
+      "bytes": 381
+    },
+    {
+      "path": "docker/local/retryruns/delivery/53ef972bb0b5288870e8a1eaf9d9dee1d7137ecd54c48e4dfd35000ceb360b16.claim",
+      "bytes": 35
+    },
+    {
+      "path": "docker/local/retryruns/delivery/54b9c445505f4a1581968f49017be5b5.json",
+      "bytes": 381
+    },
+    {
+      "path": "docker/local/retryruns/delivery/69e0c36ba51c2a01f96230bf39bd164f181b58a1f44a1c2571f95449c2d4a43a.claim",
+      "bytes": 35
+    },
+    {
+      "path": "docker/local/retryruns/delivery/6d81dee5b5cf8f021e69efe327f5bb0854cb7f0d7b8dc11e1cbded7ce0c8dee7.claim",
+      "bytes": 35
+    },
+    {
+      "path": "docker/local/retryruns/delivery/72a4d6e614654255a0904c3c2e6b104a.json",
+      "bytes": 369
+    },
+    {
+      "path": "docker/local/retryruns/delivery/78a3cd02b40c433cb6d092d8c72601c9.json",
+      "bytes": 371
+    },
+    {
+      "path": "docker/local/retryruns/delivery/797ea25b5cd6470492bd5689b52bafd3.json",
+      "bytes": 381
+    },
+    {
+      "path": "docker/local/retryruns/delivery/89ff4faaaf7d41eeaa9a13cefe196421.json",
+      "bytes": 369
+    },
+    {
+      "path": "docker/local/retryruns/delivery/8f273c2fc2d84b1592f3a26771fdf72c.json",
+      "bytes": 381
+    },
+    {
+      "path": "docker/local/retryruns/delivery/944f3df3a728409088af149ff6e28574.json",
+      "bytes": 395
+    },
+    {
+      "path": "docker/local/retryruns/delivery/a152bf4f4db04d82973f9ecd823c1fde.json",
+      "bytes": 381
+    },
+    {
+      "path": "docker/local/retryruns/delivery/a47cf08846174d269a096d4dce369db2.json",
+      "bytes": 381
+    },
+    {
+      "path": "docker/local/retryruns/delivery/ac2347b3c0384f2bb5b989467cfdb811.json",
+      "bytes": 381
+    },
+    {
+      "path": "docker/local/retryruns/delivery/adb8a1b1d8a74babb19279cf09e8b8f6.json",
+      "bytes": 369
+    },
+    {
+      "path": "docker/local/retryruns/delivery/d48c4267852d4cbb8bc7f936072f66fa.json",
+      "bytes": 395
+    },
+    {
+      "path": "docker/local/retryruns/delivery/f2fc13c2cd00471d84784667c101e9ae.json",
+      "bytes": 371
+    },
+    {
+      "path": "evaluation/results/development_oof.csv",
+      "bytes": 4268
+    },
+    {
+      "path": "evaluation/results/holdout.csv",
+      "bytes": 651
+    },
+    {
+      "path": "evaluation/results/local_smoke.json",
+      "bytes": 466
+    },
+    {
+      "path": "evaluation/results/metrics.json",
+      "bytes": 82545
+    },
+    {
+      "path": "evaluation/results/phase3a_verification.json",
+      "bytes": 5651
+    },
+    {
+      "path": "evaluation/results/phase3b_verification.json",
+      "bytes": 7383
+    },
+    {
+      "path": "evaluation/results/phase3_docker_smoke.json",
+      "bytes": 855
+    },
+    {
+      "path": "evaluation/results/phase3_smoke.json",
+      "bytes": 855
+    },
+    {
+      "path": "evaluation/results/phase3_verification.json",
+      "bytes": 2447
+    },
+    {
+      "path": "evaluation/results/security_scan.json",
+      "bytes": 242
+    },
+    {
+      "path": "evaluation/results/verification.json",
+      "bytes": 1350
+    },
+    {
+      "path": "notebooks/original/README.md",
+      "bytes": 304
+    },
+    {
+      "path": "src/urbaneats/actions.py",
+      "bytes": 768
+    },
+    {
+      "path": "src/urbaneats/briefing.py",
+      "bytes": 4972
+    },
+    {
+      "path": "src/urbaneats/config.py",
+      "bytes": 1239
+    },
+    {
+      "path": "src/urbaneats/delivery.py",
+      "bytes": 2828
+    },
+    {
+      "path": "src/urbaneats/evidence.py",
+      "bytes": 2261
+    },
+    {
+      "path": "src/urbaneats/features.py",
+      "bytes": 1094
+    },
+    {
+      "path": "src/urbaneats/hotspots.py",
+      "bytes": 1273
+    },
+    {
+      "path": "src/urbaneats/inference.py",
+      "bytes": 817
+    },
+    {
+      "path": "src/urbaneats/metrics.py",
+      "bytes": 592
+    },
+    {
+      "path": "src/urbaneats/model.py",
+      "bytes": 2739
+    },
+    {
+      "path": "src/urbaneats/provider.py",
+      "bytes": 3048
+    },
+    {
+      "path": "src/urbaneats/run_logging.py",
+      "bytes": 1464
+    },
+    {
+      "path": "src/urbaneats/schemas.py",
+      "bytes": 1684
+    },
+    {
+      "path": "src/urbaneats/service.py",
+      "bytes": 11139
+    },
+    {
+      "path": "src/urbaneats/validation.py",
+      "bytes": 2223
+    },
+    {
+      "path": "src/urbaneats/__init__.py",
+      "bytes": 98
+    },
+    {
+      "path": "workflows/n8n/notification_logic.cjs",
+      "bytes": 7557
+    },
+    {
+      "path": "workflows/n8n/outage_logic.cjs",
+      "bytes": 7117
+    },
+    {
+      "path": "workflows/n8n/README.md",
+      "bytes": 1314
+    },
+    {
+      "path": "workflows/n8n/urbaneats_core_scaffold.json",
+      "bytes": 860
+    },
+    {
+      "path": "workflows/n8n/urbaneats_live.json",
+      "bytes": 95627
+    }
+  ],
+  "protected_sha256": {
+    ".env.example": "6f57cfce1c942ca694eb4086d0731b1cf099e9e5247067a73218f649b6852097",
+    "pyproject.toml": "e4af8d947ea310fa4ddf90d8576db8e440cd378a29487daddf78afb30f8a9d24",
+    "requirements-dev.txt": "c842686600bbf26282097248f0348a2da0fa438bc0c7ef32e494ea6d8155215b",
+    "requirements.txt": "1860fc967ed79b6059e5f6a6fafbdde955228aa984dea2c7377bee07e06b61c6",
+    "urbaneats_alerts.json": "c5bf438d6da4eea6a1223582132e826963433d57d5478eafd0bdfc85ff46aa55",
+    "UrbanEats_classifier_langchain.ipynb": "d0b46d917eabceaa22ad20b19e93d6e6e38fe0935e3ffc6d06aa18a3cffdb2c4",
+    "urbaneats_delivery_orders.csv": "c1dd8a582d969445b5f83fb39453ee27ac65fcbab86ac64c979659f9b723730c",
+    "urbaneats_delivery_orders_scored.csv": "478d7612fc52e0775004af7d83ba9c3e5b3273b410fdd230a276a6673860f6e7",
+    "UrbanEats_n8n_workflow.json": "72f297e4b2e454b2fc5c59dc72b2698ae19d1af0c49062d60c523d755178223a",
+    "urbaneats_ops_brief.md": "f0f8309245c687a2237f26062988ecb357ad9f331ad24a299f631633c5373f79",
+    "UrbanEats_profiling_gx.ipynb": "158c5d1adcbe2d8b9750fcdaf1328742a7a59e317656479f554f72375792e9fe",
+    "data/current_batch.json": "63403f6427d6c08527de24c4fec0427d2b41bd60aa79faa2ca705b4346aa889e",
+    "docker/compose.yaml": "348935bfa2fb7b1dbed398a6b9b2a3177181e209237493c2c0c82b50f4493e9c",
+    "docker/runtime.Dockerfile": "3e16df261d5fbe25603c1ef555ad5403c27bf922307944cb4c1410f2299bcc9f",
+    "docs/EVALUATION.md": "14cf5337e22bb58fbd7e6bd55b95b5d2224c1625ef839c0a522a14dfd67318c0",
+    "docs/FEATURE_CONTRACT.md": "db5da369b21d76c1bdc48aad39050d40c0916a37191e8e8d2fcee3d4c39c4b38",
+    ".venv/Lib/site-packages/pandas/pyproject.toml": "3aa456a088d5137273c410cf04d340b7303bfdadc850a8d1f7009a3d7adf8ed1",
+    "artifacts/model/feature_contract.json": "1775c9f6823b79e6d4d956ef3303ea0f73e18b405204cc64d46962b50db93bac",
+    "artifacts/model/metadata.json": "0046a240897ac36f14600ab3a3bc8b861b332494615c06aa46de3bff8d34056a",
+    "artifacts/model/pipeline.joblib": "cefdec41be4ee8e9caa14111141bdb0c99e03918039667019e367ebdccca1fe1",
+    "artifacts/model/threshold.json": "021956e22d45c238974b7a339441323d3cddba023557550fed825c5ae455b974",
+    "data/processed/.gitkeep": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "data/raw/README.md": "e04fa0cc9cfdd79e9a027a9ec2bd748ff0eee1e4614d05e02e37bd29c0c8bc33",
+    "evaluation/results/metrics.json": "e138db3a62c39a908415d155984a8f761de285e384630709d83274181d5d1c01",
+    "src/urbaneats/actions.py": "727020513adb73fbd5cdb464d7bd6a3705cbfb0af298a60c387a3819542de746",
+    "src/urbaneats/briefing.py": "e7d344bf1ee3c96392494e9bfad9151339da06f072e060e2f9a732a15ef32cff",
+    "src/urbaneats/config.py": "426e119a30db2196d32feeab1d8faf56684a21a573b506cd43c050ca3785fa09",
+    "src/urbaneats/delivery.py": "162d775aa7b0ac0a3c43e9629c2012d5359a5319a1fa9e29cc6082081ae0d9e0",
+    "src/urbaneats/evidence.py": "91fd278ec913045f149587a8c38f8b73fb025fc6a2658736eb8f0665644f3ffd",
+    "src/urbaneats/features.py": "5774feece9efcf7775286fd71642bf3470e4c3725e3b4bc252b7914e88df5a71",
+    "src/urbaneats/hotspots.py": "60c5334075bb3e61dd1e5307b1232aaa92c0fb5f1e7567e29d925f53d3e5b173",
+    "src/urbaneats/inference.py": "2977bcf8158314e4b611a4bb8aee8505af734e334fbf1c3d406c6c602e7da5ab",
+    "src/urbaneats/metrics.py": "5baf213ae0de11a3e1ea9439eb7522067de42c2633ea6d0342b041bbc3c1a109",
+    "src/urbaneats/model.py": "71c92e2598ea90c54fa2c9a03f3ad6ca554bfea37ca1e873aac9d431bb5112df",
+    "src/urbaneats/provider.py": "619a18dde030935372f3e0fadefa6a6855424b6a3ca768daa5ad04c456366432",
+    "src/urbaneats/run_logging.py": "ff8198cdec1d3b41b8f48ecf629dfd31c86cb8036d7df1606feddf5df91669c0",
+    "src/urbaneats/schemas.py": "04843373bb85bcb5621732b4705ab9b697ae5cc6a4571f238d63359c99f5e100",
+    "src/urbaneats/service.py": "687f12809a3bd507bf5f24b3debb88217728d353ec0a4339c44da793d54386f0",
+    "src/urbaneats/validation.py": "4e3801dab92053dad94b0bd762d82e7f97f554ede83fd84781d1878212376559",
+    "src/urbaneats/__init__.py": "9eec8d72a86b9d4e0b273faa2e940d861c7f79ab050a7dc70b90522b39f1cfb1"
+  },
+  "protected_files_verified": 40,
+  "protected_files_changed": [],
+  "workflow_equivalent_after_dead_code_removal": true,
+  "workflow_sha256": "249438a142382751a1522c47413ab462c443efdd2faed8fa0dbc1a8670751273",
+  "canonical_workflow": "workflows/n8n/urbaneats_live.json",
+  "node_count": 22,
+  "removed_ignored_test_artifacts": [
+    "docker/local/phase3_before_3a.json",
+    "docker/local/summarize-duplicate.js",
+    "docker/local/summarize-retry.js",
+    "docker/local/summarize.js",
+    "docker/local/verify-n8n.sh",
+    "docker/local/verify-retry.sh",
+    "docker/local/workflow_retry.json",
+    "docker/local/workflow_test.json",
+    "docker/local/fixtures/failure.json",
+    "docker/local/fixtures/green.json",
+    "docker/local/fixtures/red.json",
+    "docker/local/phase3a/dns.json",
+    "docker/local/phase3a/healthy.json",
+    "docker/local/phase3a/http500.json",
+    "docker/local/phase3a/http503.json",
+    "docker/local/phase3a/initialize_cli.cjs",
+    "docker/local/phase3a/malformed.json",
+    "docker/local/phase3a/mock_transport.py",
+    "docker/local/phase3a/native_failure.log",
+    "docker/local/phase3a/prior_red_body.json",
+    "docker/local/phase3a/recovery.json",
+    "docker/local/phase3a/refused.json",
+    "docker/local/phase3a/stopped_api.json",
+    "docker/local/phase3a/summarize.cjs",
+    "docker/local/phase3a/timeout.json",
+    "docker/local/phase3b/build_phase3a.py",
+    "docker/local/phase3b/data_failure.json",
+    "docker/local/phase3b/dns.json",
+    "docker/local/phase3b/green.json",
+    "docker/local/phase3b/healthy.json",
+    "docker/local/phase3b/http500.json",
+    "docker/local/phase3b/http503.json",
+    "docker/local/phase3b/initialize_cli.cjs",
+    "docker/local/phase3b/malformed.json",
+    "docker/local/phase3b/mock_retry.json",
+    "docker/local/phase3b/mock_transport.py",
+    "docker/local/phase3b/mock_unknown.json",
+    "docker/local/phase3b/phase3a.json",
+    "docker/local/phase3b/prior_red_body.json",
+    "docker/local/phase3b/public.json",
+    "docker/local/phase3b/recovery.json",
+    "docker/local/phase3b/refused.json",
+    "docker/local/phase3b/stopped_api.json",
+    "docker/local/phase3b/summarize.cjs",
+    "docker/local/phase3b/timeout.json",
+    "docker/local/phase3b/verify_phase3a.py",
+    "docker/local/retryruns/UE-253f737a2caa44b497e75ebf4ab6e5db.json",
+    "docker/local/retryruns/UE-4fc74e8049a6470bad29bb017bcb591e.json",
+    "docker/local/retryruns/UE-98b23226fd1349129151d362636271a3.json",
+    "docker/local/retryruns/delivery/21db58b1e2ce494d860d52445abf679d.json",
+    "docker/local/retryruns/delivery/27fad85268744b0392b26fbc33c4aee1.json",
+    "docker/local/retryruns/delivery/2b2bdc08e7de4c8fbc4578b6f9efd8e6.json",
+    "docker/local/retryruns/delivery/335d26b5313fdfb2d71b5103637afd5d96255f89dde3a143d4ec50c9480bd3f8.claim",
+    "docker/local/retryruns/delivery/4e457950e2cd4991aacab027745eb61f.json",
+    "docker/local/retryruns/delivery/529a57066ab84c3b92011fa01785398c.json",
+    "docker/local/retryruns/delivery/53ef972bb0b5288870e8a1eaf9d9dee1d7137ecd54c48e4dfd35000ceb360b16.claim",
+    "docker/local/retryruns/delivery/54b9c445505f4a1581968f49017be5b5.json",
+    "docker/local/retryruns/delivery/69e0c36ba51c2a01f96230bf39bd164f181b58a1f44a1c2571f95449c2d4a43a.claim",
+    "docker/local/retryruns/delivery/6d81dee5b5cf8f021e69efe327f5bb0854cb7f0d7b8dc11e1cbded7ce0c8dee7.claim",
+    "docker/local/retryruns/delivery/72a4d6e614654255a0904c3c2e6b104a.json",
+    "docker/local/retryruns/delivery/78a3cd02b40c433cb6d092d8c72601c9.json",
+    "docker/local/retryruns/delivery/797ea25b5cd6470492bd5689b52bafd3.json",
+    "docker/local/retryruns/delivery/89ff4faaaf7d41eeaa9a13cefe196421.json",
+    "docker/local/retryruns/delivery/8f273c2fc2d84b1592f3a26771fdf72c.json",
+    "docker/local/retryruns/delivery/944f3df3a728409088af149ff6e28574.json",
+    "docker/local/retryruns/delivery/a152bf4f4db04d82973f9ecd823c1fde.json",
+    "docker/local/retryruns/delivery/a47cf08846174d269a096d4dce369db2.json",
+    "docker/local/retryruns/delivery/ac2347b3c0384f2bb5b989467cfdb811.json",
+    "docker/local/retryruns/delivery/adb8a1b1d8a74babb19279cf09e8b8f6.json",
+    "docker/local/retryruns/delivery/d48c4267852d4cbb8bc7f936072f66fa.json",
+    "docker/local/retryruns/delivery/f2fc13c2cd00471d84784667c101e9ae.json"
+  ],
+  "removed_active_scripts": [
+    "scripts/verify_outage_integration.py",
+    "scripts/smoke_test.py"
+  ],
+  "removed_uncalled_functions": [
+    "claimOutage",
+    "outageAuditRow",
+    "outageDeliveryRow"
+  ],
+  "active_scripts_before": 8,
+  "active_scripts_after": 5,
+  "current_workflow_exports_before": 2,
+  "current_workflow_exports_after": 1,
+  "dangling_current_references": [],
+  "pytest": {
+    "passed": 92,
+    "dependency_warnings": 2
+  },
+  "ruff": "PASS",
+  "native_verification": {
+    "path": "evaluation/results/phase3b1_native_verification.json",
+    "result": "PASS",
+    "executions": 17,
+    "import": "PASS",
+    "health": "READY"
+  },
+  "security_findings": 0,
+  "external_calls": 0,
+  "real_notifications": 0,
+  "commits": 0,
+  "pushes": 0
+}

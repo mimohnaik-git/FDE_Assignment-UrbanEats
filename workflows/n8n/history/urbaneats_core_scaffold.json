@@ -1,0 +1,21 @@
+{
+  "name": "UrbanEats Phase 2 core scaffold - notifications disabled",
+  "active": false,
+  "settings": {"executionOrder": "v1", "timezone": "Asia/Kolkata"},
+  "pinData": {},
+  "nodes": [
+    {
+      "id": "schedule", "name": "Scheduled current run",
+      "type": "n8n-nodes-base.scheduleTrigger", "typeVersion": 1.2,
+      "position": [0, 0],
+      "parameters": {"rule": {"interval": [{"field": "cronExpression", "expression": "30 7 * * *"}]}}
+    },
+    {
+      "id": "runtime", "name": "Process current source",
+      "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2,
+      "position": [240, 0],
+      "parameters": {"method": "POST", "url": "http://runtime:8000/process-current", "options": {"timeout": 30000}}
+    }
+  ],
+  "connections": {"Scheduled current run": {"main": [[{"node": "Process current source", "type": "main", "index": 0}]]}}
+}

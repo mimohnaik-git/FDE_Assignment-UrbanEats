@@ -1,0 +1,25 @@
+{
+  "probability_threshold": 0.3,
+  "selection_data": "development repeated OOF; not independent validation",
+  "policy": "demo cost: missed cancellation=2, false review=1; tie favors fewer reviews",
+  "selection_metrics": {
+    "threshold": 0.3,
+    "cost": 27,
+    "sample_count": 60,
+    "positives": 27,
+    "precision": 0.5333333333333333,
+    "recall": 0.8888888888888888,
+    "f1": 0.6666666666666667,
+    "roc_auc": 0.569023569023569,
+    "pr_auc_average_precision": 0.48314102458142016,
+    "brier": 0.2580783861669027,
+    "confusion_matrix_tn_fp_fn_tp": [
+      12,
+      21,
+      3,
+      24
+    ],
+    "flagged_count": 45
+  },
+  "calibration": "not calibrated; insufficient data for robust calibration"
+}

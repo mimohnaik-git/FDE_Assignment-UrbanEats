@@ -1,0 +1,38 @@
+{
+  "health": {
+    "status": "READY",
+    "model_version": "UE-23c30780e69023fb",
+    "model_loaded": true,
+    "threshold_loaded": true,
+    "runtime_status": "READY"
+  },
+  "routes": [
+    {
+      "routing": "DATA_FAILURE",
+      "run_id": "UE-5d9943d4432a43f6a4ce3bc38c75f682",
+      "records_scored": 0,
+      "evidence_ids": [
+        "FAILURE"
+      ]
+    },
+    {
+      "routing": "GREEN_SUMMARY",
+      "run_id": "UE-7f6449067c08467ba97c5a350c9e384d",
+      "records_scored": 4,
+      "evidence_ids": [
+        "KPI-BATCH",
+        "HS-2a3723fbdf946c3c"
+      ]
+    },
+    {
+      "routing": "RED_ALERT",
+      "run_id": "UE-f29e7660666c44a9a8a36c6c12c93177",
+      "records_scored": 24,
+      "evidence_ids": [
+        "KPI-BATCH",
+        "HS-2a3723fbdf946c3c"
+      ]
+    }
+  ],
+  "external_calls": false
+}

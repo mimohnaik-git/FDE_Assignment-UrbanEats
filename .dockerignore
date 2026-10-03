@@ -1,0 +1,16 @@
+.git
+.venv
+.env
+.env.*
+!.env.example
+__pycache__
+.pytest*
+.ruff_cache
+runs
+data
+*.ipynb
+*.csv
+tests
+evaluation
+docs
+workflows

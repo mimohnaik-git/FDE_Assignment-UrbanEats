@@ -1,0 +1,3566 @@
+{
+  "name": "UrbanEats Phase 3A - inactive independent outage integration",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Kolkata",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all"
+  },
+  "pinData": {},
+  "nodes": [
+    {
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "30 7 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "manual-trigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        180,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "acquire-current-batch",
+      "name": "Acquire Current Batch",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        360,
+        0
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "source",
+              "name": "source_contract",
+              "value": "mounted placement-v1 JSON; API rereads it every execution",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "call-urbaneats-api",
+      "name": "Call UrbanEats API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        540,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://urbaneats-api:8000/process-current",
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "text",
+              "neverError": true
+            }
+          }
+        }
+      },
+      "retryOnFail": false,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "validate-api-response",
+      "name": "Validate API Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Pure orchestration logic, embedded verbatim in the exported n8n Code nodes.\n// It deliberately never copies model data or arbitrary error text into outage evidence.\nfunction classifyApiResponse(response) {\n  const status = Number(response?.statusCode || response?.status || 0);\n  const error = response?.error;\n  if (status >= 500) return {failure_category: 'HTTP_5XX', http_status: status};\n  if (error) {\n    const description = typeof error === 'string' ? error : JSON.stringify(error);\n    if (/ENOTFOUND|EAI_AGAIN|getaddrinfo|incorrect host|name resolution/i.test(description))\n      return {failure_category: 'DNS_SERVICE_FAILURE'};\n    if (/ECONNREFUSED|refused.*connection|connection.*refused/i.test(description))\n      return {failure_category: 'CONNECTION_REFUSED'};\n    if (/ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED|timed?\\s*out|timeout/i.test(description))\n      return {failure_category: 'TIMEOUT'};\n    return {failure_category: 'TRANSPORT_FAILURE'};\n  }\n  if (status && (status < 200 || status >= 300))\n    return {failure_category: 'HTTP_ERROR', http_status: status};\n  // n8n's text response uses `data` even when fullResponse is enabled.\n  let body = response?.body ?? response?.data ?? response;\n  if (typeof body === 'string') {\n    try { body = JSON.parse(body); } catch { return {failure_category: 'MALFORMED_RESPONSE'}; }\n  }\n  const valid = body && ['DATA_FAILURE', 'GREEN_SUMMARY', 'RED_ALERT'].includes(body.routing_status)\n    && /^UE-[0-9a-f]{32}$/.test(body.run_id || '')\n    && body.evidence?.routing_status === body.routing_status\n    && Array.isArray(body.evidence?.facts) && body.evidence.facts.length > 0\n    && typeof body.briefing?.text === 'string';\n  return valid ? {api_response: body} : {failure_category: 'MALFORMED_RESPONSE'};\n}\n\nfunction initializeOrchestration(settings, execution, now) {\n  const override = settings.orchestration_run_id_override || '';\n  const force = settings.force_retry_nonce || '';\n  if ((override && !/^[A-Za-z0-9_-]{1,48}$/.test(override))\n      || (force && !/^[A-Za-z0-9_-]{1,16}$/.test(force))) throw Error('Invalid orchestration identity');\n  const day = new Date(now).toLocaleDateString('en-CA', {timeZone: 'Asia/Kolkata'}).replaceAll('-', '');\n  const base = override || (execution.mode === 'trigger' ? `ORCH-${day}-0730` : `ORCH-${execution.id}`);\n  const id = force ? `${base}-F-${force}` : base;\n  if (!/^[A-Za-z0-9_-]{1,48}$/.test(id)) throw Error('Invalid orchestration identity');\n  return {orchestration_run_id: id, started_at: now, test_mode: settings.test_mode !== false,\n    source_batch_id: /^[A-Za-z0-9_-]{1,100}$/.test(settings.source_batch_id || '')\n      ? settings.source_batch_id : null, claim_table_name: `UE_ORCH_${id}`};\n}\n\nfunction constructOutage(context, failure, now) {\n  const packet = {schema_version: 'orchestration-failure-v1', evidence_origin: 'orchestration',\n    orchestration_run_id: context.orchestration_run_id, generated_at: now,\n    routing_status: 'DATA_FAILURE', failure_stage: 'URBANEATS_API',\n    failure_category: failure.failure_category, attempt_count: failure.attempt_count,\n    api_service: 'urbaneats-api:8000', source_batch_id: context.source_batch_id,\n    test_mode: context.test_mode, notification_required: true,\n    attempts: failure.attempt_history};\n  const text = ['UrbanEats automation failure \u2014 DATA_FAILURE.',\n    'The scoring service could not provide a usable response after bounded attempts.',\n    'No GREEN or RED operational assessment was produced. Manual system review is required.',\n    `Orchestration run: ${packet.orchestration_run_id}; timestamp: ${now};`,\n    `stage: ${packet.failure_stage}; category: ${packet.failure_category};`,\n    `attempts: ${packet.attempt_count}; retries: ${Math.max(0, packet.attempt_count - 1)};`,\n    `source batch: ${packet.source_batch_id ?? 'unavailable'}; evidence origin: orchestration.`].join('\\n');\n  return {orchestration_run_id: context.orchestration_run_id, started_at: context.started_at,\n    test_mode: context.test_mode, source_batch_id: context.source_batch_id,\n    claim_table_name: context.claim_table_name, evidence_origin: 'orchestration', routing_status: 'DATA_FAILURE',\n    outage_evidence: packet, notification_text: text};\n}\n\nfunction claimOutage(nativeResult, context, now) {\n  const owns = typeof nativeResult?.id === 'string' && nativeResult.name === context.claim_table_name;\n  const error = typeof nativeResult?.error === 'string' ? nativeResult.error : JSON.stringify(nativeResult?.error || {});\n  const duplicate = !owns && /already exists|unique constraint|duplicate/i.test(error);\n  const state = duplicate ? 'DUPLICATE_SUPPRESSED' : !owns ? 'CLAIM_FAILED'\n    : context.test_mode ? 'SKIPPED_TEST_MODE' : 'PENDING';\n  return {...context, owns_claim: owns, send: owns && !context.test_mode,\n    duplicate_suppression: duplicate, initial_delivery_state: state,\n    audit_row: outageAuditRow(context, now, 'outage_prepared', state, state, duplicate)};\n}\n\nfunction outageAuditRow(context, now, eventType, slack, gmail, duplicate) {\n  return {orchestration_run_id: context.orchestration_run_id, started_at: context.started_at,\n    completed_at: now, api_service: 'urbaneats-api:8000',\n    attempt_count: context.outage_evidence.attempt_count,\n    failure_category: context.outage_evidence.failure_category, routing_status: 'DATA_FAILURE',\n    test_mode: context.test_mode, duplicate_suppression: duplicate,\n    slack_delivery_state: slack, gmail_delivery_state: gmail, event_type: eventType,\n    evidence_json: JSON.stringify(context.outage_evidence), delivery_channel: '',\n    slack_attempts: 0, gmail_attempts: 0, retry_allowed: false, delivery_error_category: ''};\n}\n\nfunction outageDeliveryRow(context, channel, receipt, attempt, now, skipped = false) {\n  let state = context.initial_delivery_state, category = '', retry = false;\n  if (!skipped) {\n    const ok = channel === 'slack' ? receipt.ok === true && typeof receipt.ts === 'string'\n      : typeof receipt.id === 'string' && !receipt.error;\n    const limited = channel === 'slack'\n      ? receipt.ok === false && ['ratelimited', 'rate_limited'].includes(receipt.error)\n      : receipt.statusCode === 429 || receipt.error?.statusCode === 429;\n    state = ok ? 'SUCCESS' : limited ? 'FAILURE' : 'UNKNOWN';\n    category = ok ? '' : limited ? 'RATE_LIMITED' : 'UNVERIFIED_RECEIPT';\n    retry = limited && attempt < 3;\n  }\n  const row = outageAuditRow(context, now, skipped ? 'delivery_skipped' : 'delivery_attempt',\n    channel === 'slack' ? state : context.initial_delivery_state,\n    channel === 'gmail' ? state : context.initial_delivery_state, context.duplicate_suppression);\n  row.delivery_channel = channel;\n  row[`${channel}_attempts`] = skipped ? 0 : attempt;\n  row.retry_allowed = retry;\n  row.delivery_error_category = category;\n  return row;\n}\n\n\n\nconst context=$('Initialize Orchestration').first().json;\nconst classified=classifyApiResponse($json);\nconst attempt_count=$runIndex+1;\nconst previous=$runIndex ? $('Validate API Response').all(0,$runIndex-1)[0].json.attempt_history : [];\nconst attempt_history=[...previous,{attempt:attempt_count,at:new Date().toISOString(),\n  category:classified.failure_category || 'API_RESPONSE',http_status:classified.http_status || null}];\nif(classified.api_response) return [{json:{...classified.api_response,evidence_origin:'api',\n  audit_available:true,retry_api:false,attempt_count,attempt_history}}];\nreturn [{json:{...context,evidence_origin:'orchestration',routing_status:'DATA_FAILURE',\n  audit_available:false,...classified,attempt_count,attempt_history,\n  retry_api:attempt_count<3 && classified.failure_category!=='HTTP_ERROR'}}];\n"
+      }
+    },
+    {
+      "id": "route-status",
+      "name": "Route Status",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        900,
+        0
+      ],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.routing_status }}",
+                    "rightValue": "DATA_FAILURE",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "DATA_FAILURE"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.routing_status }}",
+                    "rightValue": "GREEN_SUMMARY",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "GREEN_SUMMARY"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.routing_status }}",
+                    "rightValue": "RED_ALERT",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "RED_ALERT"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      }
+    },
+    {
+      "id": "failure-brief",
+      "name": "Failure Brief",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1080,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Hosted formatting and output validation occur inside the API before this immutable response.\nreturn [{json:$('Validate API Response').last().json}];"
+      }
+    },
+    {
+      "id": "slack-claim-data_failure",
+      "name": "Slack Claim DATA_FAILURE",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1260,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://urbaneats-api:8000/delivery",
+        "options": {
+          "timeout": 30000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({run_id: $(\"Validate API Response\").first().json.run_id, channel: \"slack\", operation: \"claim\"}) }}"
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "slack-send-enabled-data_failure",
+      "name": "Slack Send Enabled DATA_FAILURE",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1440,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.send }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "slack-data_failure",
+      "name": "Slack DATA_FAILURE",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        1620,
+        0
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "CONFIGURE_LOCALLY"
+        },
+        "text": "={{ $json.notification_text ?? $('Validate API Response').last().json.briefing.text }}",
+        "otherOptions": {}
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": false,
+      "disabled": true
+    },
+    {
+      "id": "slack-receipt-data_failure",
+      "name": "Slack Receipt DATA_FAILURE",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1800,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Pure orchestration logic, embedded verbatim in the exported n8n Code nodes.\n// It deliberately never copies model data or arbitrary error text into outage evidence.\nfunction classifyApiResponse(response) {\n  const status = Number(response?.statusCode || response?.status || 0);\n  const error = response?.error;\n  if (status >= 500) return {failure_category: 'HTTP_5XX', http_status: status};\n  if (error) {\n    const description = typeof error === 'string' ? error : JSON.stringify(error);\n    if (/ENOTFOUND|EAI_AGAIN|getaddrinfo|incorrect host|name resolution/i.test(description))\n      return {failure_category: 'DNS_SERVICE_FAILURE'};\n    if (/ECONNREFUSED|refused.*connection|connection.*refused/i.test(description))\n      return {failure_category: 'CONNECTION_REFUSED'};\n    if (/ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED|timed?\\s*out|timeout/i.test(description))\n      return {failure_category: 'TIMEOUT'};\n    return {failure_category: 'TRANSPORT_FAILURE'};\n  }\n  if (status && (status < 200 || status >= 300))\n    return {failure_category: 'HTTP_ERROR', http_status: status};\n  // n8n's text response uses `data` even when fullResponse is enabled.\n  let body = response?.body ?? response?.data ?? response;\n  if (typeof body === 'string') {\n    try { body = JSON.parse(body); } catch { return {failure_category: 'MALFORMED_RESPONSE'}; }\n  }\n  const valid = body && ['DATA_FAILURE', 'GREEN_SUMMARY', 'RED_ALERT'].includes(body.routing_status)\n    && /^UE-[0-9a-f]{32}$/.test(body.run_id || '')\n    && body.evidence?.routing_status === body.routing_status\n    && Array.isArray(body.evidence?.facts) && body.evidence.facts.length > 0\n    && typeof body.briefing?.text === 'string';\n  return valid ? {api_response: body} : {failure_category: 'MALFORMED_RESPONSE'};\n}\n\nfunction initializeOrchestration(settings, execution, now) {\n  const override = settings.orchestration_run_id_override || '';\n  const force = settings.force_retry_nonce || '';\n  if ((override && !/^[A-Za-z0-9_-]{1,48}$/.test(override))\n      || (force && !/^[A-Za-z0-9_-]{1,16}$/.test(force))) throw Error('Invalid orchestration identity');\n  const day = new Date(now).toLocaleDateString('en-CA', {timeZone: 'Asia/Kolkata'}).replaceAll('-', '');\n  const base = override || (execution.mode === 'trigger' ? `ORCH-${day}-0730` : `ORCH-${execution.id}`);\n  const id = force ? `${base}-F-${force}` : base;\n  if (!/^[A-Za-z0-9_-]{1,48}$/.test(id)) throw Error('Invalid orchestration identity');\n  return {orchestration_run_id: id, started_at: now, test_mode: settings.test_mode !== false,\n    source_batch_id: /^[A-Za-z0-9_-]{1,100}$/.test(settings.source_batch_id || '')\n      ? settings.source_batch_id : null, claim_table_name: `UE_ORCH_${id}`};\n}\n\nfunction constructOutage(context, failure, now) {\n  const packet = {schema_version: 'orchestration-failure-v1', evidence_origin: 'orchestration',\n    orchestration_run_id: context.orchestration_run_id, generated_at: now,\n    routing_status: 'DATA_FAILURE', failure_stage: 'URBANEATS_API',\n    failure_category: failure.failure_category, attempt_count: failure.attempt_count,\n    api_service: 'urbaneats-api:8000', source_batch_id: context.source_batch_id,\n    test_mode: context.test_mode, notification_required: true,\n    attempts: failure.attempt_history};\n  const text = ['UrbanEats automation failure \u2014 DATA_FAILURE.',\n    'The scoring service could not provide a usable response after bounded attempts.',\n    'No GREEN or RED operational assessment was produced. Manual system review is required.',\n    `Orchestration run: ${packet.orchestration_run_id}; timestamp: ${now};`,\n    `stage: ${packet.failure_stage}; category: ${packet.failure_category};`,\n    `attempts: ${packet.attempt_count}; retries: ${Math.max(0, packet.attempt_count - 1)};`,\n    `source batch: ${packet.source_batch_id ?? 'unavailable'}; evidence origin: orchestration.`].join('\\n');\n  return {orchestration_run_id: context.orchestration_run_id, started_at: context.started_at,\n    test_mode: context.test_mode, source_batch_id: context.source_batch_id,\n    claim_table_name: context.claim_table_name, evidence_origin: 'orchestration', routing_status: 'DATA_FAILURE',\n    outage_evidence: packet, notification_text: text};\n}\n\nfunction claimOutage(nativeResult, context, now) {\n  const owns = typeof nativeResult?.id === 'string' && nativeResult.name === context.claim_table_name;\n  const error = typeof nativeResult?.error === 'string' ? nativeResult.error : JSON.stringify(nativeResult?.error || {});\n  const duplicate = !owns && /already exists|unique constraint|duplicate/i.test(error);\n  const state = duplicate ? 'DUPLICATE_SUPPRESSED' : !owns ? 'CLAIM_FAILED'\n    : context.test_mode ? 'SKIPPED_TEST_MODE' : 'PENDING';\n  return {...context, owns_claim: owns, send: owns && !context.test_mode,\n    duplicate_suppression: duplicate, initial_delivery_state: state,\n    audit_row: outageAuditRow(context, now, 'outage_prepared', state, state, duplicate)};\n}\n\nfunction outageAuditRow(context, now, eventType, slack, gmail, duplicate) {\n  return {orchestration_run_id: context.orchestration_run_id, started_at: context.started_at,\n    completed_at: now, api_service: 'urbaneats-api:8000',\n    attempt_count: context.outage_evidence.attempt_count,\n    failure_category: context.outage_evidence.failure_category, routing_status: 'DATA_FAILURE',\n    test_mode: context.test_mode, duplicate_suppression: duplicate,\n    slack_delivery_state: slack, gmail_delivery_state: gmail, event_type: eventType,\n    evidence_json: JSON.stringify(context.outage_evidence), delivery_channel: '',\n    slack_attempts: 0, gmail_attempts: 0, retry_allowed: false, delivery_error_category: ''};\n}\n\nfunction outageDeliveryRow(context, channel, receipt, attempt, now, skipped = false) {\n  let state = context.initial_delivery_state, category = '', retry = false;\n  if (!skipped) {\n    const ok = channel === 'slack' ? receipt.ok === true && typeof receipt.ts === 'string'\n      : typeof receipt.id === 'string' && !receipt.error;\n    const limited = channel === 'slack'\n      ? receipt.ok === false && ['ratelimited', 'rate_limited'].includes(receipt.error)\n      : receipt.statusCode === 429 || receipt.error?.statusCode === 429;\n    state = ok ? 'SUCCESS' : limited ? 'FAILURE' : 'UNKNOWN';\n    category = ok ? '' : limited ? 'RATE_LIMITED' : 'UNVERIFIED_RECEIPT';\n    retry = limited && attempt < 3;\n  }\n  const row = outageAuditRow(context, now, skipped ? 'delivery_skipped' : 'delivery_attempt',\n    channel === 'slack' ? state : context.initial_delivery_state,\n    channel === 'gmail' ? state : context.initial_delivery_state, context.duplicate_suppression);\n  row.delivery_channel = channel;\n  row[`${channel}_attempts`] = skipped ? 0 : attempt;\n  row.retry_allowed = retry;\n  row.delivery_error_category = category;\n  return row;\n}\n\n\n\nif($('Validate API Response').last().json.evidence_origin==='orchestration')\n  return [{json:outageDeliveryRow($('Restore Outage Context').first().json,'slack',$json,$runIndex+1,new Date().toISOString())}];\n// Existing API delivery receipt\nconst r=$json; const ok=r.ok === true && !!r.ts; const rejected=r.ok === false && ['ratelimited','rate_limited'].includes(r.error); return [{json:{run_id:$('Validate API Response').last().json.run_id,channel:'slack',operation:'complete',outcome:ok?'success':rejected?'failure':'unknown',error_category:rejected?'rate_limited':ok?null:'provider_receipt_unverified',attempts:$runIndex+1}}];"
+      }
+    },
+    {
+      "id": "slack-delivery-log-data_failure",
+      "name": "Slack Delivery Log DATA_FAILURE",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://urbaneats-api:8000/delivery",
+        "options": {
+          "timeout": 30000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}"
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "gmail-claim-data_failure",
+      "name": "Gmail Claim DATA_FAILURE",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2160,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://urbaneats-api:8000/delivery",
+        "options": {
+          "timeout": 30000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({run_id: $(\"Validate API Response\").first().json.run_id, channel: \"gmail\", operation: \"claim\"}) }}"
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "gmail-send-enabled-data_failure",
+      "name": "Gmail Send Enabled DATA_FAILURE",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2340,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.send }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "gmail-data_failure",
+      "name": "Gmail DATA_FAILURE",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2520,
+        0
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "CONFIGURE_LOCALLY",
+        "subject": "UrbanEats DATA_FAILURE",
+        "emailType": "text",
+        "message": "={{ $json.notification_text ?? $('Validate API Response').last().json.briefing.text }}",
+        "options": {}
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": false,
+      "disabled": true
+    },
+    {
+      "id": "gmail-receipt-data_failure",
+      "name": "Gmail Receipt DATA_FAILURE",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2700,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Pure orchestration logic, embedded verbatim in the exported n8n Code nodes.\n// It deliberately never copies model data or arbitrary error text into outage evidence.\nfunction classifyApiResponse(response) {\n  const status = Number(response?.statusCode || response?.status || 0);\n  const error = response?.error;\n  if (status >= 500) return {failure_category: 'HTTP_5XX', http_status: status};\n  if (error) {\n    const description = typeof error === 'string' ? error : JSON.stringify(error);\n    if (/ENOTFOUND|EAI_AGAIN|getaddrinfo|incorrect host|name resolution/i.test(description))\n      return {failure_category: 'DNS_SERVICE_FAILURE'};\n    if (/ECONNREFUSED|refused.*connection|connection.*refused/i.test(description))\n      return {failure_category: 'CONNECTION_REFUSED'};\n    if (/ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED|timed?\\s*out|timeout/i.test(description))\n      return {failure_category: 'TIMEOUT'};\n    return {failure_category: 'TRANSPORT_FAILURE'};\n  }\n  if (status && (status < 200 || status >= 300))\n    return {failure_category: 'HTTP_ERROR', http_status: status};\n  // n8n's text response uses `data` even when fullResponse is enabled.\n  let body = response?.body ?? response?.data ?? response;\n  if (typeof body === 'string') {\n    try { body = JSON.parse(body); } catch { return {failure_category: 'MALFORMED_RESPONSE'}; }\n  }\n  const valid = body && ['DATA_FAILURE', 'GREEN_SUMMARY', 'RED_ALERT'].includes(body.routing_status)\n    && /^UE-[0-9a-f]{32}$/.test(body.run_id || '')\n    && body.evidence?.routing_status === body.routing_status\n    && Array.isArray(body.evidence?.facts) && body.evidence.facts.length > 0\n    && typeof body.briefing?.text === 'string';\n  return valid ? {api_response: body} : {failure_category: 'MALFORMED_RESPONSE'};\n}\n\nfunction initializeOrchestration(settings, execution, now) {\n  const override = settings.orchestration_run_id_override || '';\n  const force = settings.force_retry_nonce || '';\n  if ((override && !/^[A-Za-z0-9_-]{1,48}$/.test(override))\n      || (force && !/^[A-Za-z0-9_-]{1,16}$/.test(force))) throw Error('Invalid orchestration identity');\n  const day = new Date(now).toLocaleDateString('en-CA', {timeZone: 'Asia/Kolkata'}).replaceAll('-', '');\n  const base = override || (execution.mode === 'trigger' ? `ORCH-${day}-0730` : `ORCH-${execution.id}`);\n  const id = force ? `${base}-F-${force}` : base;\n  if (!/^[A-Za-z0-9_-]{1,48}$/.test(id)) throw Error('Invalid orchestration identity');\n  return {orchestration_run_id: id, started_at: now, test_mode: settings.test_mode !== false,\n    source_batch_id: /^[A-Za-z0-9_-]{1,100}$/.test(settings.source_batch_id || '')\n      ? settings.source_batch_id : null, claim_table_name: `UE_ORCH_${id}`};\n}\n\nfunction constructOutage(context, failure, now) {\n  const packet = {schema_version: 'orchestration-failure-v1', evidence_origin: 'orchestration',\n    orchestration_run_id: context.orchestration_run_id, generated_at: now,\n    routing_status: 'DATA_FAILURE', failure_stage: 'URBANEATS_API',\n    failure_category: failure.failure_category, attempt_count: failure.attempt_count,\n    api_service: 'urbaneats-api:8000', source_batch_id: context.source_batch_id,\n    test_mode: context.test_mode, notification_required: true,\n    attempts: failure.attempt_history};\n  const text = ['UrbanEats automation failure \u2014 DATA_FAILURE.',\n    'The scoring service could not provide a usable response after bounded attempts.',\n    'No GREEN or RED operational assessment was produced. Manual system review is required.',\n    `Orchestration run: ${packet.orchestration_run_id}; timestamp: ${now};`,\n    `stage: ${packet.failure_stage}; category: ${packet.failure_category};`,\n    `attempts: ${packet.attempt_count}; retries: ${Math.max(0, packet.attempt_count - 1)};`,\n    `source batch: ${packet.source_batch_id ?? 'unavailable'}; evidence origin: orchestration.`].join('\\n');\n  return {orchestration_run_id: context.orchestration_run_id, started_at: context.started_at,\n    test_mode: context.test_mode, source_batch_id: context.source_batch_id,\n    claim_table_name: context.claim_table_name, evidence_origin: 'orchestration', routing_status: 'DATA_FAILURE',\n    outage_evidence: packet, notification_text: text};\n}\n\nfunction claimOutage(nativeResult, context, now) {\n  const owns = typeof nativeResult?.id === 'string' && nativeResult.name === context.claim_table_name;\n  const error = typeof nativeResult?.error === 'string' ? nativeResult.error : JSON.stringify(nativeResult?.error || {});\n  const duplicate = !owns && /already exists|unique constraint|duplicate/i.test(error);\n  const state = duplicate ? 'DUPLICATE_SUPPRESSED' : !owns ? 'CLAIM_FAILED'\n    : context.test_mode ? 'SKIPPED_TEST_MODE' : 'PENDING';\n  return {...context, owns_claim: owns, send: owns && !context.test_mode,\n    duplicate_suppression: duplicate, initial_delivery_state: state,\n    audit_row: outageAuditRow(context, now, 'outage_prepared', state, state, duplicate)};\n}\n\nfunction outageAuditRow(context, now, eventType, slack, gmail, duplicate) {\n  return {orchestration_run_id: context.orchestration_run_id, started_at: context.started_at,\n    completed_at: now, api_service: 'urbaneats-api:8000',\n    attempt_count: context.outage_evidence.attempt_count,\n    failure_category: context.outage_evidence.failure_category, routing_status: 'DATA_FAILURE',\n    test_mode: context.test_mode, duplicate_suppression: duplicate,\n    slack_delivery_state: slack, gmail_delivery_state: gmail, event_type: eventType,\n    evidence_json: JSON.stringify(context.outage_evidence), delivery_channel: '',\n    slack_attempts: 0, gmail_attempts: 0, retry_allowed: false, delivery_error_category: ''};\n}\n\nfunction outageDeliveryRow(context, channel, receipt, attempt, now, skipped = false) {\n  let state = context.initial_delivery_state, category = '', retry = false;\n  if (!skipped) {\n    const ok = channel === 'slack' ? receipt.ok === true && typeof receipt.ts === 'string'\n      : typeof receipt.id === 'string' && !receipt.error;\n    const limited = channel === 'slack'\n      ? receipt.ok === false && ['ratelimited', 'rate_limited'].includes(receipt.error)\n      : receipt.statusCode === 429 || receipt.error?.statusCode === 429;\n    state = ok ? 'SUCCESS' : limited ? 'FAILURE' : 'UNKNOWN';\n    category = ok ? '' : limited ? 'RATE_LIMITED' : 'UNVERIFIED_RECEIPT';\n    retry = limited && attempt < 3;\n  }\n  const row = outageAuditRow(context, now, skipped ? 'delivery_skipped' : 'delivery_attempt',\n    channel === 'slack' ? state : context.initial_delivery_state,\n    channel === 'gmail' ? state : context.initial_delivery_state, context.duplicate_suppression);\n  row.delivery_channel = channel;\n  row[`${channel}_attempts`] = skipped ? 0 : attempt;\n  row.retry_allowed = retry;\n  row.delivery_error_category = category;\n  return row;\n}\n\n\n\nif($('Validate API Response').last().json.evidence_origin==='orchestration')\n  return [{json:outageDeliveryRow($('Restore Outage Context').first().json,'gmail',$json,$runIndex+1,new Date().toISOString())}];\n// Existing API delivery receipt\nconst r=$json; const ok=!!r.id && !r.error; const rejected=r.error?.statusCode === 429 || r.statusCode === 429; return [{json:{run_id:$('Validate API Response').last().json.run_id,channel:'gmail',operation:'complete',outcome:ok?'success':rejected?'failure':'unknown',error_category:rejected?'rate_limited':ok?null:'provider_receipt_unverified',attempts:$runIndex+1}}];"
+      }
+    },
+    {
+      "id": "gmail-delivery-log-data_failure",
+      "name": "Gmail Delivery Log DATA_FAILURE",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2880,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://urbaneats-api:8000/delivery",
+        "options": {
+          "timeout": 30000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}"
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "format-brief",
+      "name": "Format Brief",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3060,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Hosted formatting and output validation occur inside the API before this immutable response.\nreturn [{json:$('Validate API Response').last().json}];"
+      }
+    },
+    {
+      "id": "slack-claim-green_summary",
+      "name": "Slack Claim GREEN_SUMMARY",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3240,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://urbaneats-api:8000/delivery",
+        "options": {
+          "timeout": 30000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({run_id: $(\"Validate API Response\").first().json.run_id, channel: \"slack\", operation: \"claim\"}) }}"
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "slack-send-enabled-green_summary",
+      "name": "Slack Send Enabled GREEN_SUMMARY",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3420,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.send }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "slack-green_summary",
+      "name": "Slack GREEN_SUMMARY",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        3600,
+        0
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "CONFIGURE_LOCALLY"
+        },
+        "text": "={{ $(\"Validate API Response\").first().json.briefing.text }}",
+        "otherOptions": {}
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": false,
+      "disabled": true
+    },
+    {
+      "id": "slack-receipt-green_summary",
+      "name": "Slack Receipt GREEN_SUMMARY",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3780,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const r=$json; const ok=r.ok === true && !!r.ts; const rejected=r.ok === false && ['ratelimited','rate_limited'].includes(r.error); return [{json:{run_id:$('Validate API Response').last().json.run_id,channel:'slack',operation:'complete',outcome:ok?'success':rejected?'failure':'unknown',error_category:rejected?'rate_limited':ok?null:'provider_receipt_unverified',attempts:$runIndex+1}}];"
+      }
+    },
+    {
+      "id": "slack-delivery-log-green_summary",
+      "name": "Slack Delivery Log GREEN_SUMMARY",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3960,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://urbaneats-api:8000/delivery",
+        "options": {
+          "timeout": 30000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}"
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "gmail-claim-green_summary",
+      "name": "Gmail Claim GREEN_SUMMARY",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4140,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://urbaneats-api:8000/delivery",
+        "options": {
+          "timeout": 30000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({run_id: $(\"Validate API Response\").first().json.run_id, channel: \"gmail\", operation: \"claim\"}) }}"
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "gmail-send-enabled-green_summary",
+      "name": "Gmail Send Enabled GREEN_SUMMARY",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4320,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.send }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "gmail-green_summary",
+      "name": "Gmail GREEN_SUMMARY",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        4500,
+        0
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "CONFIGURE_LOCALLY",
+        "subject": "UrbanEats GREEN_SUMMARY",
+        "emailType": "text",
+        "message": "={{ $(\"Validate API Response\").first().json.briefing.text }}",
+        "options": {}
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": false,
+      "disabled": true
+    },
+    {
+      "id": "gmail-receipt-green_summary",
+      "name": "Gmail Receipt GREEN_SUMMARY",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4680,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const r=$json; const ok=!!r.id && !r.error; const rejected=r.error?.statusCode === 429 || r.statusCode === 429; return [{json:{run_id:$('Validate API Response').last().json.run_id,channel:'gmail',operation:'complete',outcome:ok?'success':rejected?'failure':'unknown',error_category:rejected?'rate_limited':ok?null:'provider_receipt_unverified',attempts:$runIndex+1}}];"
+      }
+    },
+    {
+      "id": "gmail-delivery-log-green_summary",
+      "name": "Gmail Delivery Log GREEN_SUMMARY",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4860,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://urbaneats-api:8000/delivery",
+        "options": {
+          "timeout": 30000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}"
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "format-evidence-and-validated-llm-brief",
+      "name": "Format Evidence and Validated LLM Brief",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5040,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Hosted formatting and output validation occur inside the API before this immutable response.\nreturn [{json:$('Validate API Response').last().json}];"
+      }
+    },
+    {
+      "id": "slack-claim-red_alert",
+      "name": "Slack Claim RED_ALERT",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5220,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://urbaneats-api:8000/delivery",
+        "options": {
+          "timeout": 30000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({run_id: $(\"Validate API Response\").first().json.run_id, channel: \"slack\", operation: \"claim\"}) }}"
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "slack-send-enabled-red_alert",
+      "name": "Slack Send Enabled RED_ALERT",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        5400,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.send }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "slack-red_alert",
+      "name": "Slack RED_ALERT",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        5580,
+        0
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "CONFIGURE_LOCALLY"
+        },
+        "text": "={{ $(\"Validate API Response\").first().json.briefing.text }}",
+        "otherOptions": {}
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": false,
+      "disabled": true
+    },
+    {
+      "id": "slack-receipt-red_alert",
+      "name": "Slack Receipt RED_ALERT",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5760,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const r=$json; const ok=r.ok === true && !!r.ts; const rejected=r.ok === false && ['ratelimited','rate_limited'].includes(r.error); return [{json:{run_id:$('Validate API Response').last().json.run_id,channel:'slack',operation:'complete',outcome:ok?'success':rejected?'failure':'unknown',error_category:rejected?'rate_limited':ok?null:'provider_receipt_unverified',attempts:$runIndex+1}}];"
+      }
+    },
+    {
+      "id": "slack-delivery-log-red_alert",
+      "name": "Slack Delivery Log RED_ALERT",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5940,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://urbaneats-api:8000/delivery",
+        "options": {
+          "timeout": 30000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}"
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "gmail-claim-red_alert",
+      "name": "Gmail Claim RED_ALERT",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6120,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://urbaneats-api:8000/delivery",
+        "options": {
+          "timeout": 30000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({run_id: $(\"Validate API Response\").first().json.run_id, channel: \"gmail\", operation: \"claim\"}) }}"
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "gmail-send-enabled-red_alert",
+      "name": "Gmail Send Enabled RED_ALERT",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        6300,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.send }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "gmail-red_alert",
+      "name": "Gmail RED_ALERT",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        6480,
+        0
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "CONFIGURE_LOCALLY",
+        "subject": "UrbanEats RED_ALERT",
+        "emailType": "text",
+        "message": "={{ $(\"Validate API Response\").first().json.briefing.text }}",
+        "options": {}
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": false,
+      "disabled": true
+    },
+    {
+      "id": "gmail-receipt-red_alert",
+      "name": "Gmail Receipt RED_ALERT",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6660,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const r=$json; const ok=!!r.id && !r.error; const rejected=r.error?.statusCode === 429 || r.statusCode === 429; return [{json:{run_id:$('Validate API Response').last().json.run_id,channel:'gmail',operation:'complete',outcome:ok?'success':rejected?'failure':'unknown',error_category:rejected?'rate_limited':ok?null:'provider_receipt_unverified',attempts:$runIndex+1}}];"
+      }
+    },
+    {
+      "id": "gmail-delivery-log-red_alert",
+      "name": "Gmail Delivery Log RED_ALERT",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6840,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://urbaneats-api:8000/delivery",
+        "options": {
+          "timeout": 30000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}"
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "audit-gate",
+      "name": "Audit Available",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        500,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.audit_available }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "slack-retry-allowed-data_failure",
+      "name": "Slack Retry Allowed DATA_FAILURE",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1500,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.retry }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "slack-retry-delay-data_failure",
+      "name": "Slack Retry Delay DATA_FAILURE",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1600,
+        300
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 2,
+        "unit": "seconds"
+      }
+    },
+    {
+      "id": "gmail-retry-allowed-data_failure",
+      "name": "Gmail Retry Allowed DATA_FAILURE",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1500,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.retry }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "gmail-retry-delay-data_failure",
+      "name": "Gmail Retry Delay DATA_FAILURE",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1600,
+        300
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 2,
+        "unit": "seconds"
+      }
+    },
+    {
+      "id": "slack-retry-allowed-green_summary",
+      "name": "Slack Retry Allowed GREEN_SUMMARY",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1500,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.retry }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "slack-retry-delay-green_summary",
+      "name": "Slack Retry Delay GREEN_SUMMARY",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1600,
+        300
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 2,
+        "unit": "seconds"
+      }
+    },
+    {
+      "id": "gmail-retry-allowed-green_summary",
+      "name": "Gmail Retry Allowed GREEN_SUMMARY",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1500,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.retry }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "gmail-retry-delay-green_summary",
+      "name": "Gmail Retry Delay GREEN_SUMMARY",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1600,
+        300
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 2,
+        "unit": "seconds"
+      }
+    },
+    {
+      "id": "slack-retry-allowed-red_alert",
+      "name": "Slack Retry Allowed RED_ALERT",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1500,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.retry }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "slack-retry-delay-red_alert",
+      "name": "Slack Retry Delay RED_ALERT",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1600,
+        300
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 2,
+        "unit": "seconds"
+      }
+    },
+    {
+      "id": "gmail-retry-allowed-red_alert",
+      "name": "Gmail Retry Allowed RED_ALERT",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1500,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.retry }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "gmail-retry-delay-red_alert",
+      "name": "Gmail Retry Delay RED_ALERT",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1600,
+        300
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 2,
+        "unit": "seconds"
+      }
+    },
+    {
+      "id": "orchestration-settings",
+      "name": "Orchestration Settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3640,
+        800
+      ],
+      "parameters": {
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "test_mode",
+              "name": "test_mode",
+              "type": "boolean",
+              "value": true
+            },
+            {
+              "id": "orchestration_run_id_override",
+              "name": "orchestration_run_id_override",
+              "type": "string",
+              "value": ""
+            },
+            {
+              "id": "force_retry_nonce",
+              "name": "force_retry_nonce",
+              "type": "string",
+              "value": ""
+            },
+            {
+              "id": "source_batch_id",
+              "name": "source_batch_id",
+              "type": "string",
+              "value": ""
+            }
+          ]
+        },
+        "options": {}
+      },
+      "notes": "Phase 3A independent outage path"
+    },
+    {
+      "id": "initialize-orchestration",
+      "name": "Initialize Orchestration",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3710,
+        800
+      ],
+      "parameters": {
+        "jsCode": "// Pure orchestration logic, embedded verbatim in the exported n8n Code nodes.\n// It deliberately never copies model data or arbitrary error text into outage evidence.\nfunction classifyApiResponse(response) {\n  const status = Number(response?.statusCode || response?.status || 0);\n  const error = response?.error;\n  if (status >= 500) return {failure_category: 'HTTP_5XX', http_status: status};\n  if (error) {\n    const description = typeof error === 'string' ? error : JSON.stringify(error);\n    if (/ENOTFOUND|EAI_AGAIN|getaddrinfo|incorrect host|name resolution/i.test(description))\n      return {failure_category: 'DNS_SERVICE_FAILURE'};\n    if (/ECONNREFUSED|refused.*connection|connection.*refused/i.test(description))\n      return {failure_category: 'CONNECTION_REFUSED'};\n    if (/ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED|timed?\\s*out|timeout/i.test(description))\n      return {failure_category: 'TIMEOUT'};\n    return {failure_category: 'TRANSPORT_FAILURE'};\n  }\n  if (status && (status < 200 || status >= 300))\n    return {failure_category: 'HTTP_ERROR', http_status: status};\n  // n8n's text response uses `data` even when fullResponse is enabled.\n  let body = response?.body ?? response?.data ?? response;\n  if (typeof body === 'string') {\n    try { body = JSON.parse(body); } catch { return {failure_category: 'MALFORMED_RESPONSE'}; }\n  }\n  const valid = body && ['DATA_FAILURE', 'GREEN_SUMMARY', 'RED_ALERT'].includes(body.routing_status)\n    && /^UE-[0-9a-f]{32}$/.test(body.run_id || '')\n    && body.evidence?.routing_status === body.routing_status\n    && Array.isArray(body.evidence?.facts) && body.evidence.facts.length > 0\n    && typeof body.briefing?.text === 'string';\n  return valid ? {api_response: body} : {failure_category: 'MALFORMED_RESPONSE'};\n}\n\nfunction initializeOrchestration(settings, execution, now) {\n  const override = settings.orchestration_run_id_override || '';\n  const force = settings.force_retry_nonce || '';\n  if ((override && !/^[A-Za-z0-9_-]{1,48}$/.test(override))\n      || (force && !/^[A-Za-z0-9_-]{1,16}$/.test(force))) throw Error('Invalid orchestration identity');\n  const day = new Date(now).toLocaleDateString('en-CA', {timeZone: 'Asia/Kolkata'}).replaceAll('-', '');\n  const base = override || (execution.mode === 'trigger' ? `ORCH-${day}-0730` : `ORCH-${execution.id}`);\n  const id = force ? `${base}-F-${force}` : base;\n  if (!/^[A-Za-z0-9_-]{1,48}$/.test(id)) throw Error('Invalid orchestration identity');\n  return {orchestration_run_id: id, started_at: now, test_mode: settings.test_mode !== false,\n    source_batch_id: /^[A-Za-z0-9_-]{1,100}$/.test(settings.source_batch_id || '')\n      ? settings.source_batch_id : null, claim_table_name: `UE_ORCH_${id}`};\n}\n\nfunction constructOutage(context, failure, now) {\n  const packet = {schema_version: 'orchestration-failure-v1', evidence_origin: 'orchestration',\n    orchestration_run_id: context.orchestration_run_id, generated_at: now,\n    routing_status: 'DATA_FAILURE', failure_stage: 'URBANEATS_API',\n    failure_category: failure.failure_category, attempt_count: failure.attempt_count,\n    api_service: 'urbaneats-api:8000', source_batch_id: context.source_batch_id,\n    test_mode: context.test_mode, notification_required: true,\n    attempts: failure.attempt_history};\n  const text = ['UrbanEats automation failure \u2014 DATA_FAILURE.',\n    'The scoring service could not provide a usable response after bounded attempts.',\n    'No GREEN or RED operational assessment was produced. Manual system review is required.',\n    `Orchestration run: ${packet.orchestration_run_id}; timestamp: ${now};`,\n    `stage: ${packet.failure_stage}; category: ${packet.failure_category};`,\n    `attempts: ${packet.attempt_count}; retries: ${Math.max(0, packet.attempt_count - 1)};`,\n    `source batch: ${packet.source_batch_id ?? 'unavailable'}; evidence origin: orchestration.`].join('\\n');\n  return {orchestration_run_id: context.orchestration_run_id, started_at: context.started_at,\n    test_mode: context.test_mode, source_batch_id: context.source_batch_id,\n    claim_table_name: context.claim_table_name, evidence_origin: 'orchestration', routing_status: 'DATA_FAILURE',\n    outage_evidence: packet, notification_text: text};\n}\n\nfunction claimOutage(nativeResult, context, now) {\n  const owns = typeof nativeResult?.id === 'string' && nativeResult.name === context.claim_table_name;\n  const error = typeof nativeResult?.error === 'string' ? nativeResult.error : JSON.stringify(nativeResult?.error || {});\n  const duplicate = !owns && /already exists|unique constraint|duplicate/i.test(error);\n  const state = duplicate ? 'DUPLICATE_SUPPRESSED' : !owns ? 'CLAIM_FAILED'\n    : context.test_mode ? 'SKIPPED_TEST_MODE' : 'PENDING';\n  return {...context, owns_claim: owns, send: owns && !context.test_mode,\n    duplicate_suppression: duplicate, initial_delivery_state: state,\n    audit_row: outageAuditRow(context, now, 'outage_prepared', state, state, duplicate)};\n}\n\nfunction outageAuditRow(context, now, eventType, slack, gmail, duplicate) {\n  return {orchestration_run_id: context.orchestration_run_id, started_at: context.started_at,\n    completed_at: now, api_service: 'urbaneats-api:8000',\n    attempt_count: context.outage_evidence.attempt_count,\n    failure_category: context.outage_evidence.failure_category, routing_status: 'DATA_FAILURE',\n    test_mode: context.test_mode, duplicate_suppression: duplicate,\n    slack_delivery_state: slack, gmail_delivery_state: gmail, event_type: eventType,\n    evidence_json: JSON.stringify(context.outage_evidence), delivery_channel: '',\n    slack_attempts: 0, gmail_attempts: 0, retry_allowed: false, delivery_error_category: ''};\n}\n\nfunction outageDeliveryRow(context, channel, receipt, attempt, now, skipped = false) {\n  let state = context.initial_delivery_state, category = '', retry = false;\n  if (!skipped) {\n    const ok = channel === 'slack' ? receipt.ok === true && typeof receipt.ts === 'string'\n      : typeof receipt.id === 'string' && !receipt.error;\n    const limited = channel === 'slack'\n      ? receipt.ok === false && ['ratelimited', 'rate_limited'].includes(receipt.error)\n      : receipt.statusCode === 429 || receipt.error?.statusCode === 429;\n    state = ok ? 'SUCCESS' : limited ? 'FAILURE' : 'UNKNOWN';\n    category = ok ? '' : limited ? 'RATE_LIMITED' : 'UNVERIFIED_RECEIPT';\n    retry = limited && attempt < 3;\n  }\n  const row = outageAuditRow(context, now, skipped ? 'delivery_skipped' : 'delivery_attempt',\n    channel === 'slack' ? state : context.initial_delivery_state,\n    channel === 'gmail' ? state : context.initial_delivery_state, context.duplicate_suppression);\n  row.delivery_channel = channel;\n  row[`${channel}_attempts`] = skipped ? 0 : attempt;\n  row.retry_allowed = retry;\n  row.delivery_error_category = category;\n  return row;\n}\n\n\nreturn [{json:initializeOrchestration($json, $execution, new Date().toISOString())}];"
+      },
+      "notes": "Phase 3A independent outage path"
+    },
+    {
+      "id": "retry-api-request",
+      "name": "Retry API Request",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3780,
+        800
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.retry_api }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "notes": "Phase 3A independent outage path"
+    },
+    {
+      "id": "api-retry-delay",
+      "name": "API Retry Delay",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3850,
+        800
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 1,
+        "unit": "seconds"
+      },
+      "notes": "Phase 3A independent outage path"
+    },
+    {
+      "id": "prepare-outage-evidence",
+      "name": "Prepare Outage Evidence",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3920,
+        800
+      ],
+      "parameters": {
+        "jsCode": "// Pure orchestration logic, embedded verbatim in the exported n8n Code nodes.\n// It deliberately never copies model data or arbitrary error text into outage evidence.\nfunction classifyApiResponse(response) {\n  const status = Number(response?.statusCode || response?.status || 0);\n  const error = response?.error;\n  if (status >= 500) return {failure_category: 'HTTP_5XX', http_status: status};\n  if (error) {\n    const description = typeof error === 'string' ? error : JSON.stringify(error);\n    if (/ENOTFOUND|EAI_AGAIN|getaddrinfo|incorrect host|name resolution/i.test(description))\n      return {failure_category: 'DNS_SERVICE_FAILURE'};\n    if (/ECONNREFUSED|refused.*connection|connection.*refused/i.test(description))\n      return {failure_category: 'CONNECTION_REFUSED'};\n    if (/ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED|timed?\\s*out|timeout/i.test(description))\n      return {failure_category: 'TIMEOUT'};\n    return {failure_category: 'TRANSPORT_FAILURE'};\n  }\n  if (status && (status < 200 || status >= 300))\n    return {failure_category: 'HTTP_ERROR', http_status: status};\n  // n8n's text response uses `data` even when fullResponse is enabled.\n  let body = response?.body ?? response?.data ?? response;\n  if (typeof body === 'string') {\n    try { body = JSON.parse(body); } catch { return {failure_category: 'MALFORMED_RESPONSE'}; }\n  }\n  const valid = body && ['DATA_FAILURE', 'GREEN_SUMMARY', 'RED_ALERT'].includes(body.routing_status)\n    && /^UE-[0-9a-f]{32}$/.test(body.run_id || '')\n    && body.evidence?.routing_status === body.routing_status\n    && Array.isArray(body.evidence?.facts) && body.evidence.facts.length > 0\n    && typeof body.briefing?.text === 'string';\n  return valid ? {api_response: body} : {failure_category: 'MALFORMED_RESPONSE'};\n}\n\nfunction initializeOrchestration(settings, execution, now) {\n  const override = settings.orchestration_run_id_override || '';\n  const force = settings.force_retry_nonce || '';\n  if ((override && !/^[A-Za-z0-9_-]{1,48}$/.test(override))\n      || (force && !/^[A-Za-z0-9_-]{1,16}$/.test(force))) throw Error('Invalid orchestration identity');\n  const day = new Date(now).toLocaleDateString('en-CA', {timeZone: 'Asia/Kolkata'}).replaceAll('-', '');\n  const base = override || (execution.mode === 'trigger' ? `ORCH-${day}-0730` : `ORCH-${execution.id}`);\n  const id = force ? `${base}-F-${force}` : base;\n  if (!/^[A-Za-z0-9_-]{1,48}$/.test(id)) throw Error('Invalid orchestration identity');\n  return {orchestration_run_id: id, started_at: now, test_mode: settings.test_mode !== false,\n    source_batch_id: /^[A-Za-z0-9_-]{1,100}$/.test(settings.source_batch_id || '')\n      ? settings.source_batch_id : null, claim_table_name: `UE_ORCH_${id}`};\n}\n\nfunction constructOutage(context, failure, now) {\n  const packet = {schema_version: 'orchestration-failure-v1', evidence_origin: 'orchestration',\n    orchestration_run_id: context.orchestration_run_id, generated_at: now,\n    routing_status: 'DATA_FAILURE', failure_stage: 'URBANEATS_API',\n    failure_category: failure.failure_category, attempt_count: failure.attempt_count,\n    api_service: 'urbaneats-api:8000', source_batch_id: context.source_batch_id,\n    test_mode: context.test_mode, notification_required: true,\n    attempts: failure.attempt_history};\n  const text = ['UrbanEats automation failure \u2014 DATA_FAILURE.',\n    'The scoring service could not provide a usable response after bounded attempts.',\n    'No GREEN or RED operational assessment was produced. Manual system review is required.',\n    `Orchestration run: ${packet.orchestration_run_id}; timestamp: ${now};`,\n    `stage: ${packet.failure_stage}; category: ${packet.failure_category};`,\n    `attempts: ${packet.attempt_count}; retries: ${Math.max(0, packet.attempt_count - 1)};`,\n    `source batch: ${packet.source_batch_id ?? 'unavailable'}; evidence origin: orchestration.`].join('\\n');\n  return {orchestration_run_id: context.orchestration_run_id, started_at: context.started_at,\n    test_mode: context.test_mode, source_batch_id: context.source_batch_id,\n    claim_table_name: context.claim_table_name, evidence_origin: 'orchestration', routing_status: 'DATA_FAILURE',\n    outage_evidence: packet, notification_text: text};\n}\n\nfunction claimOutage(nativeResult, context, now) {\n  const owns = typeof nativeResult?.id === 'string' && nativeResult.name === context.claim_table_name;\n  const error = typeof nativeResult?.error === 'string' ? nativeResult.error : JSON.stringify(nativeResult?.error || {});\n  const duplicate = !owns && /already exists|unique constraint|duplicate/i.test(error);\n  const state = duplicate ? 'DUPLICATE_SUPPRESSED' : !owns ? 'CLAIM_FAILED'\n    : context.test_mode ? 'SKIPPED_TEST_MODE' : 'PENDING';\n  return {...context, owns_claim: owns, send: owns && !context.test_mode,\n    duplicate_suppression: duplicate, initial_delivery_state: state,\n    audit_row: outageAuditRow(context, now, 'outage_prepared', state, state, duplicate)};\n}\n\nfunction outageAuditRow(context, now, eventType, slack, gmail, duplicate) {\n  return {orchestration_run_id: context.orchestration_run_id, started_at: context.started_at,\n    completed_at: now, api_service: 'urbaneats-api:8000',\n    attempt_count: context.outage_evidence.attempt_count,\n    failure_category: context.outage_evidence.failure_category, routing_status: 'DATA_FAILURE',\n    test_mode: context.test_mode, duplicate_suppression: duplicate,\n    slack_delivery_state: slack, gmail_delivery_state: gmail, event_type: eventType,\n    evidence_json: JSON.stringify(context.outage_evidence), delivery_channel: '',\n    slack_attempts: 0, gmail_attempts: 0, retry_allowed: false, delivery_error_category: ''};\n}\n\nfunction outageDeliveryRow(context, channel, receipt, attempt, now, skipped = false) {\n  let state = context.initial_delivery_state, category = '', retry = false;\n  if (!skipped) {\n    const ok = channel === 'slack' ? receipt.ok === true && typeof receipt.ts === 'string'\n      : typeof receipt.id === 'string' && !receipt.error;\n    const limited = channel === 'slack'\n      ? receipt.ok === false && ['ratelimited', 'rate_limited'].includes(receipt.error)\n      : receipt.statusCode === 429 || receipt.error?.statusCode === 429;\n    state = ok ? 'SUCCESS' : limited ? 'FAILURE' : 'UNKNOWN';\n    category = ok ? '' : limited ? 'RATE_LIMITED' : 'UNVERIFIED_RECEIPT';\n    retry = limited && attempt < 3;\n  }\n  const row = outageAuditRow(context, now, skipped ? 'delivery_skipped' : 'delivery_attempt',\n    channel === 'slack' ? state : context.initial_delivery_state,\n    channel === 'gmail' ? state : context.initial_delivery_state, context.duplicate_suppression);\n  row.delivery_channel = channel;\n  row[`${channel}_attempts`] = skipped ? 0 : attempt;\n  row.retry_allowed = retry;\n  row.delivery_error_category = category;\n  return row;\n}\n\n\nreturn [{json:constructOutage($('Initialize Orchestration').first().json,$json,new Date().toISOString())}];"
+      },
+      "notes": "Phase 3A independent outage path"
+    },
+    {
+      "id": "claim-orchestration-run",
+      "name": "Claim Orchestration Run",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        3990,
+        800
+      ],
+      "parameters": {
+        "resource": "table",
+        "operation": "create",
+        "tableName": "={{ $json.claim_table_name }}",
+        "columns": {
+          "column": [
+            {
+              "name": "orchestration_run_id",
+              "type": "string"
+            },
+            {
+              "name": "started_at",
+              "type": "string"
+            },
+            {
+              "name": "completed_at",
+              "type": "string"
+            },
+            {
+              "name": "api_service",
+              "type": "string"
+            },
+            {
+              "name": "attempt_count",
+              "type": "number"
+            },
+            {
+              "name": "failure_category",
+              "type": "string"
+            },
+            {
+              "name": "routing_status",
+              "type": "string"
+            },
+            {
+              "name": "test_mode",
+              "type": "boolean"
+            },
+            {
+              "name": "duplicate_suppression",
+              "type": "boolean"
+            },
+            {
+              "name": "slack_delivery_state",
+              "type": "string"
+            },
+            {
+              "name": "gmail_delivery_state",
+              "type": "string"
+            },
+            {
+              "name": "event_type",
+              "type": "string"
+            },
+            {
+              "name": "evidence_json",
+              "type": "string"
+            },
+            {
+              "name": "delivery_channel",
+              "type": "string"
+            },
+            {
+              "name": "slack_attempts",
+              "type": "number"
+            },
+            {
+              "name": "gmail_attempts",
+              "type": "number"
+            },
+            {
+              "name": "retry_allowed",
+              "type": "boolean"
+            },
+            {
+              "name": "delivery_error_category",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {
+          "createIfNotExists": false
+        }
+      },
+      "notes": "Phase 3A independent outage path",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "determine-outage-claim",
+      "name": "Determine Outage Claim",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4060,
+        800
+      ],
+      "parameters": {
+        "jsCode": "// Pure orchestration logic, embedded verbatim in the exported n8n Code nodes.\n// It deliberately never copies model data or arbitrary error text into outage evidence.\nfunction classifyApiResponse(response) {\n  const status = Number(response?.statusCode || response?.status || 0);\n  const error = response?.error;\n  if (status >= 500) return {failure_category: 'HTTP_5XX', http_status: status};\n  if (error) {\n    const description = typeof error === 'string' ? error : JSON.stringify(error);\n    if (/ENOTFOUND|EAI_AGAIN|getaddrinfo|incorrect host|name resolution/i.test(description))\n      return {failure_category: 'DNS_SERVICE_FAILURE'};\n    if (/ECONNREFUSED|refused.*connection|connection.*refused/i.test(description))\n      return {failure_category: 'CONNECTION_REFUSED'};\n    if (/ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED|timed?\\s*out|timeout/i.test(description))\n      return {failure_category: 'TIMEOUT'};\n    return {failure_category: 'TRANSPORT_FAILURE'};\n  }\n  if (status && (status < 200 || status >= 300))\n    return {failure_category: 'HTTP_ERROR', http_status: status};\n  // n8n's text response uses `data` even when fullResponse is enabled.\n  let body = response?.body ?? response?.data ?? response;\n  if (typeof body === 'string') {\n    try { body = JSON.parse(body); } catch { return {failure_category: 'MALFORMED_RESPONSE'}; }\n  }\n  const valid = body && ['DATA_FAILURE', 'GREEN_SUMMARY', 'RED_ALERT'].includes(body.routing_status)\n    && /^UE-[0-9a-f]{32}$/.test(body.run_id || '')\n    && body.evidence?.routing_status === body.routing_status\n    && Array.isArray(body.evidence?.facts) && body.evidence.facts.length > 0\n    && typeof body.briefing?.text === 'string';\n  return valid ? {api_response: body} : {failure_category: 'MALFORMED_RESPONSE'};\n}\n\nfunction initializeOrchestration(settings, execution, now) {\n  const override = settings.orchestration_run_id_override || '';\n  const force = settings.force_retry_nonce || '';\n  if ((override && !/^[A-Za-z0-9_-]{1,48}$/.test(override))\n      || (force && !/^[A-Za-z0-9_-]{1,16}$/.test(force))) throw Error('Invalid orchestration identity');\n  const day = new Date(now).toLocaleDateString('en-CA', {timeZone: 'Asia/Kolkata'}).replaceAll('-', '');\n  const base = override || (execution.mode === 'trigger' ? `ORCH-${day}-0730` : `ORCH-${execution.id}`);\n  const id = force ? `${base}-F-${force}` : base;\n  if (!/^[A-Za-z0-9_-]{1,48}$/.test(id)) throw Error('Invalid orchestration identity');\n  return {orchestration_run_id: id, started_at: now, test_mode: settings.test_mode !== false,\n    source_batch_id: /^[A-Za-z0-9_-]{1,100}$/.test(settings.source_batch_id || '')\n      ? settings.source_batch_id : null, claim_table_name: `UE_ORCH_${id}`};\n}\n\nfunction constructOutage(context, failure, now) {\n  const packet = {schema_version: 'orchestration-failure-v1', evidence_origin: 'orchestration',\n    orchestration_run_id: context.orchestration_run_id, generated_at: now,\n    routing_status: 'DATA_FAILURE', failure_stage: 'URBANEATS_API',\n    failure_category: failure.failure_category, attempt_count: failure.attempt_count,\n    api_service: 'urbaneats-api:8000', source_batch_id: context.source_batch_id,\n    test_mode: context.test_mode, notification_required: true,\n    attempts: failure.attempt_history};\n  const text = ['UrbanEats automation failure \u2014 DATA_FAILURE.',\n    'The scoring service could not provide a usable response after bounded attempts.',\n    'No GREEN or RED operational assessment was produced. Manual system review is required.',\n    `Orchestration run: ${packet.orchestration_run_id}; timestamp: ${now};`,\n    `stage: ${packet.failure_stage}; category: ${packet.failure_category};`,\n    `attempts: ${packet.attempt_count}; retries: ${Math.max(0, packet.attempt_count - 1)};`,\n    `source batch: ${packet.source_batch_id ?? 'unavailable'}; evidence origin: orchestration.`].join('\\n');\n  return {orchestration_run_id: context.orchestration_run_id, started_at: context.started_at,\n    test_mode: context.test_mode, source_batch_id: context.source_batch_id,\n    claim_table_name: context.claim_table_name, evidence_origin: 'orchestration', routing_status: 'DATA_FAILURE',\n    outage_evidence: packet, notification_text: text};\n}\n\nfunction claimOutage(nativeResult, context, now) {\n  const owns = typeof nativeResult?.id === 'string' && nativeResult.name === context.claim_table_name;\n  const error = typeof nativeResult?.error === 'string' ? nativeResult.error : JSON.stringify(nativeResult?.error || {});\n  const duplicate = !owns && /already exists|unique constraint|duplicate/i.test(error);\n  const state = duplicate ? 'DUPLICATE_SUPPRESSED' : !owns ? 'CLAIM_FAILED'\n    : context.test_mode ? 'SKIPPED_TEST_MODE' : 'PENDING';\n  return {...context, owns_claim: owns, send: owns && !context.test_mode,\n    duplicate_suppression: duplicate, initial_delivery_state: state,\n    audit_row: outageAuditRow(context, now, 'outage_prepared', state, state, duplicate)};\n}\n\nfunction outageAuditRow(context, now, eventType, slack, gmail, duplicate) {\n  return {orchestration_run_id: context.orchestration_run_id, started_at: context.started_at,\n    completed_at: now, api_service: 'urbaneats-api:8000',\n    attempt_count: context.outage_evidence.attempt_count,\n    failure_category: context.outage_evidence.failure_category, routing_status: 'DATA_FAILURE',\n    test_mode: context.test_mode, duplicate_suppression: duplicate,\n    slack_delivery_state: slack, gmail_delivery_state: gmail, event_type: eventType,\n    evidence_json: JSON.stringify(context.outage_evidence), delivery_channel: '',\n    slack_attempts: 0, gmail_attempts: 0, retry_allowed: false, delivery_error_category: ''};\n}\n\nfunction outageDeliveryRow(context, channel, receipt, attempt, now, skipped = false) {\n  let state = context.initial_delivery_state, category = '', retry = false;\n  if (!skipped) {\n    const ok = channel === 'slack' ? receipt.ok === true && typeof receipt.ts === 'string'\n      : typeof receipt.id === 'string' && !receipt.error;\n    const limited = channel === 'slack'\n      ? receipt.ok === false && ['ratelimited', 'rate_limited'].includes(receipt.error)\n      : receipt.statusCode === 429 || receipt.error?.statusCode === 429;\n    state = ok ? 'SUCCESS' : limited ? 'FAILURE' : 'UNKNOWN';\n    category = ok ? '' : limited ? 'RATE_LIMITED' : 'UNVERIFIED_RECEIPT';\n    retry = limited && attempt < 3;\n  }\n  const row = outageAuditRow(context, now, skipped ? 'delivery_skipped' : 'delivery_attempt',\n    channel === 'slack' ? state : context.initial_delivery_state,\n    channel === 'gmail' ? state : context.initial_delivery_state, context.duplicate_suppression);\n  row.delivery_channel = channel;\n  row[`${channel}_attempts`] = skipped ? 0 : attempt;\n  row.retry_allowed = retry;\n  row.delivery_error_category = category;\n  return row;\n}\n\n\nconst p=claimOutage($json,$('Prepare Outage Evidence').first().json,new Date().toISOString()); return [{json:p}];"
+      },
+      "notes": "Phase 3A independent outage path"
+    },
+    {
+      "id": "initial-outage-audit-record",
+      "name": "Initial Outage Audit Record",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4130,
+        800
+      ],
+      "parameters": {
+        "jsCode": "// Pure orchestration logic, embedded verbatim in the exported n8n Code nodes.\n// It deliberately never copies model data or arbitrary error text into outage evidence.\nfunction classifyApiResponse(response) {\n  const status = Number(response?.statusCode || response?.status || 0);\n  const error = response?.error;\n  if (status >= 500) return {failure_category: 'HTTP_5XX', http_status: status};\n  if (error) {\n    const description = typeof error === 'string' ? error : JSON.stringify(error);\n    if (/ENOTFOUND|EAI_AGAIN|getaddrinfo|incorrect host|name resolution/i.test(description))\n      return {failure_category: 'DNS_SERVICE_FAILURE'};\n    if (/ECONNREFUSED|refused.*connection|connection.*refused/i.test(description))\n      return {failure_category: 'CONNECTION_REFUSED'};\n    if (/ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED|timed?\\s*out|timeout/i.test(description))\n      return {failure_category: 'TIMEOUT'};\n    return {failure_category: 'TRANSPORT_FAILURE'};\n  }\n  if (status && (status < 200 || status >= 300))\n    return {failure_category: 'HTTP_ERROR', http_status: status};\n  // n8n's text response uses `data` even when fullResponse is enabled.\n  let body = response?.body ?? response?.data ?? response;\n  if (typeof body === 'string') {\n    try { body = JSON.parse(body); } catch { return {failure_category: 'MALFORMED_RESPONSE'}; }\n  }\n  const valid = body && ['DATA_FAILURE', 'GREEN_SUMMARY', 'RED_ALERT'].includes(body.routing_status)\n    && /^UE-[0-9a-f]{32}$/.test(body.run_id || '')\n    && body.evidence?.routing_status === body.routing_status\n    && Array.isArray(body.evidence?.facts) && body.evidence.facts.length > 0\n    && typeof body.briefing?.text === 'string';\n  return valid ? {api_response: body} : {failure_category: 'MALFORMED_RESPONSE'};\n}\n\nfunction initializeOrchestration(settings, execution, now) {\n  const override = settings.orchestration_run_id_override || '';\n  const force = settings.force_retry_nonce || '';\n  if ((override && !/^[A-Za-z0-9_-]{1,48}$/.test(override))\n      || (force && !/^[A-Za-z0-9_-]{1,16}$/.test(force))) throw Error('Invalid orchestration identity');\n  const day = new Date(now).toLocaleDateString('en-CA', {timeZone: 'Asia/Kolkata'}).replaceAll('-', '');\n  const base = override || (execution.mode === 'trigger' ? `ORCH-${day}-0730` : `ORCH-${execution.id}`);\n  const id = force ? `${base}-F-${force}` : base;\n  if (!/^[A-Za-z0-9_-]{1,48}$/.test(id)) throw Error('Invalid orchestration identity');\n  return {orchestration_run_id: id, started_at: now, test_mode: settings.test_mode !== false,\n    source_batch_id: /^[A-Za-z0-9_-]{1,100}$/.test(settings.source_batch_id || '')\n      ? settings.source_batch_id : null, claim_table_name: `UE_ORCH_${id}`};\n}\n\nfunction constructOutage(context, failure, now) {\n  const packet = {schema_version: 'orchestration-failure-v1', evidence_origin: 'orchestration',\n    orchestration_run_id: context.orchestration_run_id, generated_at: now,\n    routing_status: 'DATA_FAILURE', failure_stage: 'URBANEATS_API',\n    failure_category: failure.failure_category, attempt_count: failure.attempt_count,\n    api_service: 'urbaneats-api:8000', source_batch_id: context.source_batch_id,\n    test_mode: context.test_mode, notification_required: true,\n    attempts: failure.attempt_history};\n  const text = ['UrbanEats automation failure \u2014 DATA_FAILURE.',\n    'The scoring service could not provide a usable response after bounded attempts.',\n    'No GREEN or RED operational assessment was produced. Manual system review is required.',\n    `Orchestration run: ${packet.orchestration_run_id}; timestamp: ${now};`,\n    `stage: ${packet.failure_stage}; category: ${packet.failure_category};`,\n    `attempts: ${packet.attempt_count}; retries: ${Math.max(0, packet.attempt_count - 1)};`,\n    `source batch: ${packet.source_batch_id ?? 'unavailable'}; evidence origin: orchestration.`].join('\\n');\n  return {orchestration_run_id: context.orchestration_run_id, started_at: context.started_at,\n    test_mode: context.test_mode, source_batch_id: context.source_batch_id,\n    claim_table_name: context.claim_table_name, evidence_origin: 'orchestration', routing_status: 'DATA_FAILURE',\n    outage_evidence: packet, notification_text: text};\n}\n\nfunction claimOutage(nativeResult, context, now) {\n  const owns = typeof nativeResult?.id === 'string' && nativeResult.name === context.claim_table_name;\n  const error = typeof nativeResult?.error === 'string' ? nativeResult.error : JSON.stringify(nativeResult?.error || {});\n  const duplicate = !owns && /already exists|unique constraint|duplicate/i.test(error);\n  const state = duplicate ? 'DUPLICATE_SUPPRESSED' : !owns ? 'CLAIM_FAILED'\n    : context.test_mode ? 'SKIPPED_TEST_MODE' : 'PENDING';\n  return {...context, owns_claim: owns, send: owns && !context.test_mode,\n    duplicate_suppression: duplicate, initial_delivery_state: state,\n    audit_row: outageAuditRow(context, now, 'outage_prepared', state, state, duplicate)};\n}\n\nfunction outageAuditRow(context, now, eventType, slack, gmail, duplicate) {\n  return {orchestration_run_id: context.orchestration_run_id, started_at: context.started_at,\n    completed_at: now, api_service: 'urbaneats-api:8000',\n    attempt_count: context.outage_evidence.attempt_count,\n    failure_category: context.outage_evidence.failure_category, routing_status: 'DATA_FAILURE',\n    test_mode: context.test_mode, duplicate_suppression: duplicate,\n    slack_delivery_state: slack, gmail_delivery_state: gmail, event_type: eventType,\n    evidence_json: JSON.stringify(context.outage_evidence), delivery_channel: '',\n    slack_attempts: 0, gmail_attempts: 0, retry_allowed: false, delivery_error_category: ''};\n}\n\nfunction outageDeliveryRow(context, channel, receipt, attempt, now, skipped = false) {\n  let state = context.initial_delivery_state, category = '', retry = false;\n  if (!skipped) {\n    const ok = channel === 'slack' ? receipt.ok === true && typeof receipt.ts === 'string'\n      : typeof receipt.id === 'string' && !receipt.error;\n    const limited = channel === 'slack'\n      ? receipt.ok === false && ['ratelimited', 'rate_limited'].includes(receipt.error)\n      : receipt.statusCode === 429 || receipt.error?.statusCode === 429;\n    state = ok ? 'SUCCESS' : limited ? 'FAILURE' : 'UNKNOWN';\n    category = ok ? '' : limited ? 'RATE_LIMITED' : 'UNVERIFIED_RECEIPT';\n    retry = limited && attempt < 3;\n  }\n  const row = outageAuditRow(context, now, skipped ? 'delivery_skipped' : 'delivery_attempt',\n    channel === 'slack' ? state : context.initial_delivery_state,\n    channel === 'gmail' ? state : context.initial_delivery_state, context.duplicate_suppression);\n  row.delivery_channel = channel;\n  row[`${channel}_attempts`] = skipped ? 0 : attempt;\n  row.retry_allowed = retry;\n  row.delivery_error_category = category;\n  return row;\n}\n\n\nreturn [{json:$('Determine Outage Claim').first().json.audit_row}];"
+      },
+      "notes": "Phase 3A independent outage path"
+    },
+    {
+      "id": "persist-outage-evidence",
+      "name": "Persist Outage Evidence",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        4200,
+        800
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "={{ $('Prepare Outage Evidence').first().json.claim_table_name }}"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "orchestration_run_id": "={{ $json.orchestration_run_id }}",
+            "started_at": "={{ $json.started_at }}",
+            "completed_at": "={{ $json.completed_at }}",
+            "api_service": "={{ $json.api_service }}",
+            "attempt_count": "={{ $json.attempt_count }}",
+            "failure_category": "={{ $json.failure_category }}",
+            "routing_status": "={{ $json.routing_status }}",
+            "test_mode": "={{ $json.test_mode }}",
+            "duplicate_suppression": "={{ $json.duplicate_suppression }}",
+            "slack_delivery_state": "={{ $json.slack_delivery_state }}",
+            "gmail_delivery_state": "={{ $json.gmail_delivery_state }}",
+            "event_type": "={{ $json.event_type }}",
+            "evidence_json": "={{ $json.evidence_json }}",
+            "delivery_channel": "={{ $json.delivery_channel }}",
+            "slack_attempts": "={{ $json.slack_attempts }}",
+            "gmail_attempts": "={{ $json.gmail_attempts }}",
+            "retry_allowed": "={{ $json.retry_allowed }}",
+            "delivery_error_category": "={{ $json.delivery_error_category }}"
+          },
+          "schema": [
+            {
+              "id": "orchestration_run_id",
+              "displayName": "orchestration_run_id",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "started_at",
+              "displayName": "started_at",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "completed_at",
+              "displayName": "completed_at",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "api_service",
+              "displayName": "api_service",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "attempt_count",
+              "displayName": "attempt_count",
+              "type": "number",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "failure_category",
+              "displayName": "failure_category",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "routing_status",
+              "displayName": "routing_status",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "test_mode",
+              "displayName": "test_mode",
+              "type": "boolean",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "duplicate_suppression",
+              "displayName": "duplicate_suppression",
+              "type": "boolean",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "slack_delivery_state",
+              "displayName": "slack_delivery_state",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "gmail_delivery_state",
+              "displayName": "gmail_delivery_state",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "event_type",
+              "displayName": "event_type",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "evidence_json",
+              "displayName": "evidence_json",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "delivery_channel",
+              "displayName": "delivery_channel",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "slack_attempts",
+              "displayName": "slack_attempts",
+              "type": "number",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "gmail_attempts",
+              "displayName": "gmail_attempts",
+              "type": "number",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "retry_allowed",
+              "displayName": "retry_allowed",
+              "type": "boolean",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "delivery_error_category",
+              "displayName": "delivery_error_category",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "notes": "Phase 3A independent outage path"
+    },
+    {
+      "id": "restore-outage-context",
+      "name": "Restore Outage Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4270,
+        800
+      ],
+      "parameters": {
+        "jsCode": "// Pure orchestration logic, embedded verbatim in the exported n8n Code nodes.\n// It deliberately never copies model data or arbitrary error text into outage evidence.\nfunction classifyApiResponse(response) {\n  const status = Number(response?.statusCode || response?.status || 0);\n  const error = response?.error;\n  if (status >= 500) return {failure_category: 'HTTP_5XX', http_status: status};\n  if (error) {\n    const description = typeof error === 'string' ? error : JSON.stringify(error);\n    if (/ENOTFOUND|EAI_AGAIN|getaddrinfo|incorrect host|name resolution/i.test(description))\n      return {failure_category: 'DNS_SERVICE_FAILURE'};\n    if (/ECONNREFUSED|refused.*connection|connection.*refused/i.test(description))\n      return {failure_category: 'CONNECTION_REFUSED'};\n    if (/ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED|timed?\\s*out|timeout/i.test(description))\n      return {failure_category: 'TIMEOUT'};\n    return {failure_category: 'TRANSPORT_FAILURE'};\n  }\n  if (status && (status < 200 || status >= 300))\n    return {failure_category: 'HTTP_ERROR', http_status: status};\n  // n8n's text response uses `data` even when fullResponse is enabled.\n  let body = response?.body ?? response?.data ?? response;\n  if (typeof body === 'string') {\n    try { body = JSON.parse(body); } catch { return {failure_category: 'MALFORMED_RESPONSE'}; }\n  }\n  const valid = body && ['DATA_FAILURE', 'GREEN_SUMMARY', 'RED_ALERT'].includes(body.routing_status)\n    && /^UE-[0-9a-f]{32}$/.test(body.run_id || '')\n    && body.evidence?.routing_status === body.routing_status\n    && Array.isArray(body.evidence?.facts) && body.evidence.facts.length > 0\n    && typeof body.briefing?.text === 'string';\n  return valid ? {api_response: body} : {failure_category: 'MALFORMED_RESPONSE'};\n}\n\nfunction initializeOrchestration(settings, execution, now) {\n  const override = settings.orchestration_run_id_override || '';\n  const force = settings.force_retry_nonce || '';\n  if ((override && !/^[A-Za-z0-9_-]{1,48}$/.test(override))\n      || (force && !/^[A-Za-z0-9_-]{1,16}$/.test(force))) throw Error('Invalid orchestration identity');\n  const day = new Date(now).toLocaleDateString('en-CA', {timeZone: 'Asia/Kolkata'}).replaceAll('-', '');\n  const base = override || (execution.mode === 'trigger' ? `ORCH-${day}-0730` : `ORCH-${execution.id}`);\n  const id = force ? `${base}-F-${force}` : base;\n  if (!/^[A-Za-z0-9_-]{1,48}$/.test(id)) throw Error('Invalid orchestration identity');\n  return {orchestration_run_id: id, started_at: now, test_mode: settings.test_mode !== false,\n    source_batch_id: /^[A-Za-z0-9_-]{1,100}$/.test(settings.source_batch_id || '')\n      ? settings.source_batch_id : null, claim_table_name: `UE_ORCH_${id}`};\n}\n\nfunction constructOutage(context, failure, now) {\n  const packet = {schema_version: 'orchestration-failure-v1', evidence_origin: 'orchestration',\n    orchestration_run_id: context.orchestration_run_id, generated_at: now,\n    routing_status: 'DATA_FAILURE', failure_stage: 'URBANEATS_API',\n    failure_category: failure.failure_category, attempt_count: failure.attempt_count,\n    api_service: 'urbaneats-api:8000', source_batch_id: context.source_batch_id,\n    test_mode: context.test_mode, notification_required: true,\n    attempts: failure.attempt_history};\n  const text = ['UrbanEats automation failure \u2014 DATA_FAILURE.',\n    'The scoring service could not provide a usable response after bounded attempts.',\n    'No GREEN or RED operational assessment was produced. Manual system review is required.',\n    `Orchestration run: ${packet.orchestration_run_id}; timestamp: ${now};`,\n    `stage: ${packet.failure_stage}; category: ${packet.failure_category};`,\n    `attempts: ${packet.attempt_count}; retries: ${Math.max(0, packet.attempt_count - 1)};`,\n    `source batch: ${packet.source_batch_id ?? 'unavailable'}; evidence origin: orchestration.`].join('\\n');\n  return {orchestration_run_id: context.orchestration_run_id, started_at: context.started_at,\n    test_mode: context.test_mode, source_batch_id: context.source_batch_id,\n    claim_table_name: context.claim_table_name, evidence_origin: 'orchestration', routing_status: 'DATA_FAILURE',\n    outage_evidence: packet, notification_text: text};\n}\n\nfunction claimOutage(nativeResult, context, now) {\n  const owns = typeof nativeResult?.id === 'string' && nativeResult.name === context.claim_table_name;\n  const error = typeof nativeResult?.error === 'string' ? nativeResult.error : JSON.stringify(nativeResult?.error || {});\n  const duplicate = !owns && /already exists|unique constraint|duplicate/i.test(error);\n  const state = duplicate ? 'DUPLICATE_SUPPRESSED' : !owns ? 'CLAIM_FAILED'\n    : context.test_mode ? 'SKIPPED_TEST_MODE' : 'PENDING';\n  return {...context, owns_claim: owns, send: owns && !context.test_mode,\n    duplicate_suppression: duplicate, initial_delivery_state: state,\n    audit_row: outageAuditRow(context, now, 'outage_prepared', state, state, duplicate)};\n}\n\nfunction outageAuditRow(context, now, eventType, slack, gmail, duplicate) {\n  return {orchestration_run_id: context.orchestration_run_id, started_at: context.started_at,\n    completed_at: now, api_service: 'urbaneats-api:8000',\n    attempt_count: context.outage_evidence.attempt_count,\n    failure_category: context.outage_evidence.failure_category, routing_status: 'DATA_FAILURE',\n    test_mode: context.test_mode, duplicate_suppression: duplicate,\n    slack_delivery_state: slack, gmail_delivery_state: gmail, event_type: eventType,\n    evidence_json: JSON.stringify(context.outage_evidence), delivery_channel: '',\n    slack_attempts: 0, gmail_attempts: 0, retry_allowed: false, delivery_error_category: ''};\n}\n\nfunction outageDeliveryRow(context, channel, receipt, attempt, now, skipped = false) {\n  let state = context.initial_delivery_state, category = '', retry = false;\n  if (!skipped) {\n    const ok = channel === 'slack' ? receipt.ok === true && typeof receipt.ts === 'string'\n      : typeof receipt.id === 'string' && !receipt.error;\n    const limited = channel === 'slack'\n      ? receipt.ok === false && ['ratelimited', 'rate_limited'].includes(receipt.error)\n      : receipt.statusCode === 429 || receipt.error?.statusCode === 429;\n    state = ok ? 'SUCCESS' : limited ? 'FAILURE' : 'UNKNOWN';\n    category = ok ? '' : limited ? 'RATE_LIMITED' : 'UNVERIFIED_RECEIPT';\n    retry = limited && attempt < 3;\n  }\n  const row = outageAuditRow(context, now, skipped ? 'delivery_skipped' : 'delivery_attempt',\n    channel === 'slack' ? state : context.initial_delivery_state,\n    channel === 'gmail' ? state : context.initial_delivery_state, context.duplicate_suppression);\n  row.delivery_channel = channel;\n  row[`${channel}_attempts`] = skipped ? 0 : attempt;\n  row.retry_allowed = retry;\n  row.delivery_error_category = category;\n  return row;\n}\n\n\nconst p=$('Determine Outage Claim').first().json; if($json.orchestration_run_id!==p.orchestration_run_id) throw Error('Outage audit mismatch'); return [{json:p}];"
+      },
+      "notes": "Phase 3A independent outage path"
+    },
+    {
+      "id": "merge-outage-delivery-states",
+      "name": "Merge Outage Delivery States",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        4340,
+        800
+      ],
+      "parameters": {
+        "mode": "append",
+        "numberInputs": 2
+      },
+      "notes": "Phase 3A independent outage path"
+    },
+    {
+      "id": "complete-outage-audit",
+      "name": "Complete Outage Audit",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4410,
+        800
+      ],
+      "parameters": {
+        "jsCode": "// Pure orchestration logic, embedded verbatim in the exported n8n Code nodes.\n// It deliberately never copies model data or arbitrary error text into outage evidence.\nfunction classifyApiResponse(response) {\n  const status = Number(response?.statusCode || response?.status || 0);\n  const error = response?.error;\n  if (status >= 500) return {failure_category: 'HTTP_5XX', http_status: status};\n  if (error) {\n    const description = typeof error === 'string' ? error : JSON.stringify(error);\n    if (/ENOTFOUND|EAI_AGAIN|getaddrinfo|incorrect host|name resolution/i.test(description))\n      return {failure_category: 'DNS_SERVICE_FAILURE'};\n    if (/ECONNREFUSED|refused.*connection|connection.*refused/i.test(description))\n      return {failure_category: 'CONNECTION_REFUSED'};\n    if (/ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED|timed?\\s*out|timeout/i.test(description))\n      return {failure_category: 'TIMEOUT'};\n    return {failure_category: 'TRANSPORT_FAILURE'};\n  }\n  if (status && (status < 200 || status >= 300))\n    return {failure_category: 'HTTP_ERROR', http_status: status};\n  // n8n's text response uses `data` even when fullResponse is enabled.\n  let body = response?.body ?? response?.data ?? response;\n  if (typeof body === 'string') {\n    try { body = JSON.parse(body); } catch { return {failure_category: 'MALFORMED_RESPONSE'}; }\n  }\n  const valid = body && ['DATA_FAILURE', 'GREEN_SUMMARY', 'RED_ALERT'].includes(body.routing_status)\n    && /^UE-[0-9a-f]{32}$/.test(body.run_id || '')\n    && body.evidence?.routing_status === body.routing_status\n    && Array.isArray(body.evidence?.facts) && body.evidence.facts.length > 0\n    && typeof body.briefing?.text === 'string';\n  return valid ? {api_response: body} : {failure_category: 'MALFORMED_RESPONSE'};\n}\n\nfunction initializeOrchestration(settings, execution, now) {\n  const override = settings.orchestration_run_id_override || '';\n  const force = settings.force_retry_nonce || '';\n  if ((override && !/^[A-Za-z0-9_-]{1,48}$/.test(override))\n      || (force && !/^[A-Za-z0-9_-]{1,16}$/.test(force))) throw Error('Invalid orchestration identity');\n  const day = new Date(now).toLocaleDateString('en-CA', {timeZone: 'Asia/Kolkata'}).replaceAll('-', '');\n  const base = override || (execution.mode === 'trigger' ? `ORCH-${day}-0730` : `ORCH-${execution.id}`);\n  const id = force ? `${base}-F-${force}` : base;\n  if (!/^[A-Za-z0-9_-]{1,48}$/.test(id)) throw Error('Invalid orchestration identity');\n  return {orchestration_run_id: id, started_at: now, test_mode: settings.test_mode !== false,\n    source_batch_id: /^[A-Za-z0-9_-]{1,100}$/.test(settings.source_batch_id || '')\n      ? settings.source_batch_id : null, claim_table_name: `UE_ORCH_${id}`};\n}\n\nfunction constructOutage(context, failure, now) {\n  const packet = {schema_version: 'orchestration-failure-v1', evidence_origin: 'orchestration',\n    orchestration_run_id: context.orchestration_run_id, generated_at: now,\n    routing_status: 'DATA_FAILURE', failure_stage: 'URBANEATS_API',\n    failure_category: failure.failure_category, attempt_count: failure.attempt_count,\n    api_service: 'urbaneats-api:8000', source_batch_id: context.source_batch_id,\n    test_mode: context.test_mode, notification_required: true,\n    attempts: failure.attempt_history};\n  const text = ['UrbanEats automation failure \u2014 DATA_FAILURE.',\n    'The scoring service could not provide a usable response after bounded attempts.',\n    'No GREEN or RED operational assessment was produced. Manual system review is required.',\n    `Orchestration run: ${packet.orchestration_run_id}; timestamp: ${now};`,\n    `stage: ${packet.failure_stage}; category: ${packet.failure_category};`,\n    `attempts: ${packet.attempt_count}; retries: ${Math.max(0, packet.attempt_count - 1)};`,\n    `source batch: ${packet.source_batch_id ?? 'unavailable'}; evidence origin: orchestration.`].join('\\n');\n  return {orchestration_run_id: context.orchestration_run_id, started_at: context.started_at,\n    test_mode: context.test_mode, source_batch_id: context.source_batch_id,\n    claim_table_name: context.claim_table_name, evidence_origin: 'orchestration', routing_status: 'DATA_FAILURE',\n    outage_evidence: packet, notification_text: text};\n}\n\nfunction claimOutage(nativeResult, context, now) {\n  const owns = typeof nativeResult?.id === 'string' && nativeResult.name === context.claim_table_name;\n  const error = typeof nativeResult?.error === 'string' ? nativeResult.error : JSON.stringify(nativeResult?.error || {});\n  const duplicate = !owns && /already exists|unique constraint|duplicate/i.test(error);\n  const state = duplicate ? 'DUPLICATE_SUPPRESSED' : !owns ? 'CLAIM_FAILED'\n    : context.test_mode ? 'SKIPPED_TEST_MODE' : 'PENDING';\n  return {...context, owns_claim: owns, send: owns && !context.test_mode,\n    duplicate_suppression: duplicate, initial_delivery_state: state,\n    audit_row: outageAuditRow(context, now, 'outage_prepared', state, state, duplicate)};\n}\n\nfunction outageAuditRow(context, now, eventType, slack, gmail, duplicate) {\n  return {orchestration_run_id: context.orchestration_run_id, started_at: context.started_at,\n    completed_at: now, api_service: 'urbaneats-api:8000',\n    attempt_count: context.outage_evidence.attempt_count,\n    failure_category: context.outage_evidence.failure_category, routing_status: 'DATA_FAILURE',\n    test_mode: context.test_mode, duplicate_suppression: duplicate,\n    slack_delivery_state: slack, gmail_delivery_state: gmail, event_type: eventType,\n    evidence_json: JSON.stringify(context.outage_evidence), delivery_channel: '',\n    slack_attempts: 0, gmail_attempts: 0, retry_allowed: false, delivery_error_category: ''};\n}\n\nfunction outageDeliveryRow(context, channel, receipt, attempt, now, skipped = false) {\n  let state = context.initial_delivery_state, category = '', retry = false;\n  if (!skipped) {\n    const ok = channel === 'slack' ? receipt.ok === true && typeof receipt.ts === 'string'\n      : typeof receipt.id === 'string' && !receipt.error;\n    const limited = channel === 'slack'\n      ? receipt.ok === false && ['ratelimited', 'rate_limited'].includes(receipt.error)\n      : receipt.statusCode === 429 || receipt.error?.statusCode === 429;\n    state = ok ? 'SUCCESS' : limited ? 'FAILURE' : 'UNKNOWN';\n    category = ok ? '' : limited ? 'RATE_LIMITED' : 'UNVERIFIED_RECEIPT';\n    retry = limited && attempt < 3;\n  }\n  const row = outageAuditRow(context, now, skipped ? 'delivery_skipped' : 'delivery_attempt',\n    channel === 'slack' ? state : context.initial_delivery_state,\n    channel === 'gmail' ? state : context.initial_delivery_state, context.duplicate_suppression);\n  row.delivery_channel = channel;\n  row[`${channel}_attempts`] = skipped ? 0 : attempt;\n  row.retry_allowed = retry;\n  row.delivery_error_category = category;\n  return row;\n}\n\n\n\nconst rows=$input.all().map(i=>i.json); const p=$('Restore Outage Context').first().json;\nconst slack=rows.find(r=>r.delivery_channel==='slack'); const gmail=rows.find(r=>r.delivery_channel==='gmail');\nif(!slack || !gmail || rows.some(r=>r.orchestration_run_id!==p.orchestration_run_id)) throw Error('Outage delivery audit mismatch');\nconst row=outageAuditRow(p,new Date().toISOString(),'orchestration_complete',\n slack.slack_delivery_state,gmail.gmail_delivery_state,p.duplicate_suppression);\nrow.slack_attempts=slack.slack_attempts; row.gmail_attempts=gmail.gmail_attempts;\nreturn [{json:row}];\n"
+      },
+      "notes": "Phase 3A independent outage path"
+    },
+    {
+      "id": "persist-completed-outage-audit",
+      "name": "Persist Completed Outage Audit",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        4480,
+        800
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "={{ $('Prepare Outage Evidence').first().json.claim_table_name }}"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "orchestration_run_id": "={{ $json.orchestration_run_id }}",
+            "started_at": "={{ $json.started_at }}",
+            "completed_at": "={{ $json.completed_at }}",
+            "api_service": "={{ $json.api_service }}",
+            "attempt_count": "={{ $json.attempt_count }}",
+            "failure_category": "={{ $json.failure_category }}",
+            "routing_status": "={{ $json.routing_status }}",
+            "test_mode": "={{ $json.test_mode }}",
+            "duplicate_suppression": "={{ $json.duplicate_suppression }}",
+            "slack_delivery_state": "={{ $json.slack_delivery_state }}",
+            "gmail_delivery_state": "={{ $json.gmail_delivery_state }}",
+            "event_type": "={{ $json.event_type }}",
+            "evidence_json": "={{ $json.evidence_json }}",
+            "delivery_channel": "={{ $json.delivery_channel }}",
+            "slack_attempts": "={{ $json.slack_attempts }}",
+            "gmail_attempts": "={{ $json.gmail_attempts }}",
+            "retry_allowed": "={{ $json.retry_allowed }}",
+            "delivery_error_category": "={{ $json.delivery_error_category }}"
+          },
+          "schema": [
+            {
+              "id": "orchestration_run_id",
+              "displayName": "orchestration_run_id",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "started_at",
+              "displayName": "started_at",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "completed_at",
+              "displayName": "completed_at",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "api_service",
+              "displayName": "api_service",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "attempt_count",
+              "displayName": "attempt_count",
+              "type": "number",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "failure_category",
+              "displayName": "failure_category",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "routing_status",
+              "displayName": "routing_status",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "test_mode",
+              "displayName": "test_mode",
+              "type": "boolean",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "duplicate_suppression",
+              "displayName": "duplicate_suppression",
+              "type": "boolean",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "slack_delivery_state",
+              "displayName": "slack_delivery_state",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "gmail_delivery_state",
+              "displayName": "gmail_delivery_state",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "event_type",
+              "displayName": "event_type",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "evidence_json",
+              "displayName": "evidence_json",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "delivery_channel",
+              "displayName": "delivery_channel",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "slack_attempts",
+              "displayName": "slack_attempts",
+              "type": "number",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "gmail_attempts",
+              "displayName": "gmail_attempts",
+              "type": "number",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "retry_allowed",
+              "displayName": "retry_allowed",
+              "type": "boolean",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "delivery_error_category",
+              "displayName": "delivery_error_category",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "notes": "Phase 3A independent outage path"
+    },
+    {
+      "id": "slack-is-outage-receipt",
+      "name": "Slack Is Outage Receipt",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4550,
+        800
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ !!$json.orchestration_run_id }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "notes": "Phase 3A independent outage path"
+    },
+    {
+      "id": "slack-is-outage-skip",
+      "name": "Slack Is Outage Skip",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4620,
+        800
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.evidence_origin === 'orchestration' }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "notes": "Phase 3A independent outage path"
+    },
+    {
+      "id": "slack-outage-skipped-record",
+      "name": "Slack Outage Skipped Record",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4690,
+        800
+      ],
+      "parameters": {
+        "jsCode": "// Pure orchestration logic, embedded verbatim in the exported n8n Code nodes.\n// It deliberately never copies model data or arbitrary error text into outage evidence.\nfunction classifyApiResponse(response) {\n  const status = Number(response?.statusCode || response?.status || 0);\n  const error = response?.error;\n  if (status >= 500) return {failure_category: 'HTTP_5XX', http_status: status};\n  if (error) {\n    const description = typeof error === 'string' ? error : JSON.stringify(error);\n    if (/ENOTFOUND|EAI_AGAIN|getaddrinfo|incorrect host|name resolution/i.test(description))\n      return {failure_category: 'DNS_SERVICE_FAILURE'};\n    if (/ECONNREFUSED|refused.*connection|connection.*refused/i.test(description))\n      return {failure_category: 'CONNECTION_REFUSED'};\n    if (/ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED|timed?\\s*out|timeout/i.test(description))\n      return {failure_category: 'TIMEOUT'};\n    return {failure_category: 'TRANSPORT_FAILURE'};\n  }\n  if (status && (status < 200 || status >= 300))\n    return {failure_category: 'HTTP_ERROR', http_status: status};\n  // n8n's text response uses `data` even when fullResponse is enabled.\n  let body = response?.body ?? response?.data ?? response;\n  if (typeof body === 'string') {\n    try { body = JSON.parse(body); } catch { return {failure_category: 'MALFORMED_RESPONSE'}; }\n  }\n  const valid = body && ['DATA_FAILURE', 'GREEN_SUMMARY', 'RED_ALERT'].includes(body.routing_status)\n    && /^UE-[0-9a-f]{32}$/.test(body.run_id || '')\n    && body.evidence?.routing_status === body.routing_status\n    && Array.isArray(body.evidence?.facts) && body.evidence.facts.length > 0\n    && typeof body.briefing?.text === 'string';\n  return valid ? {api_response: body} : {failure_category: 'MALFORMED_RESPONSE'};\n}\n\nfunction initializeOrchestration(settings, execution, now) {\n  const override = settings.orchestration_run_id_override || '';\n  const force = settings.force_retry_nonce || '';\n  if ((override && !/^[A-Za-z0-9_-]{1,48}$/.test(override))\n      || (force && !/^[A-Za-z0-9_-]{1,16}$/.test(force))) throw Error('Invalid orchestration identity');\n  const day = new Date(now).toLocaleDateString('en-CA', {timeZone: 'Asia/Kolkata'}).replaceAll('-', '');\n  const base = override || (execution.mode === 'trigger' ? `ORCH-${day}-0730` : `ORCH-${execution.id}`);\n  const id = force ? `${base}-F-${force}` : base;\n  if (!/^[A-Za-z0-9_-]{1,48}$/.test(id)) throw Error('Invalid orchestration identity');\n  return {orchestration_run_id: id, started_at: now, test_mode: settings.test_mode !== false,\n    source_batch_id: /^[A-Za-z0-9_-]{1,100}$/.test(settings.source_batch_id || '')\n      ? settings.source_batch_id : null, claim_table_name: `UE_ORCH_${id}`};\n}\n\nfunction constructOutage(context, failure, now) {\n  const packet = {schema_version: 'orchestration-failure-v1', evidence_origin: 'orchestration',\n    orchestration_run_id: context.orchestration_run_id, generated_at: now,\n    routing_status: 'DATA_FAILURE', failure_stage: 'URBANEATS_API',\n    failure_category: failure.failure_category, attempt_count: failure.attempt_count,\n    api_service: 'urbaneats-api:8000', source_batch_id: context.source_batch_id,\n    test_mode: context.test_mode, notification_required: true,\n    attempts: failure.attempt_history};\n  const text = ['UrbanEats automation failure \u2014 DATA_FAILURE.',\n    'The scoring service could not provide a usable response after bounded attempts.',\n    'No GREEN or RED operational assessment was produced. Manual system review is required.',\n    `Orchestration run: ${packet.orchestration_run_id}; timestamp: ${now};`,\n    `stage: ${packet.failure_stage}; category: ${packet.failure_category};`,\n    `attempts: ${packet.attempt_count}; retries: ${Math.max(0, packet.attempt_count - 1)};`,\n    `source batch: ${packet.source_batch_id ?? 'unavailable'}; evidence origin: orchestration.`].join('\\n');\n  return {orchestration_run_id: context.orchestration_run_id, started_at: context.started_at,\n    test_mode: context.test_mode, source_batch_id: context.source_batch_id,\n    claim_table_name: context.claim_table_name, evidence_origin: 'orchestration', routing_status: 'DATA_FAILURE',\n    outage_evidence: packet, notification_text: text};\n}\n\nfunction claimOutage(nativeResult, context, now) {\n  const owns = typeof nativeResult?.id === 'string' && nativeResult.name === context.claim_table_name;\n  const error = typeof nativeResult?.error === 'string' ? nativeResult.error : JSON.stringify(nativeResult?.error || {});\n  const duplicate = !owns && /already exists|unique constraint|duplicate/i.test(error);\n  const state = duplicate ? 'DUPLICATE_SUPPRESSED' : !owns ? 'CLAIM_FAILED'\n    : context.test_mode ? 'SKIPPED_TEST_MODE' : 'PENDING';\n  return {...context, owns_claim: owns, send: owns && !context.test_mode,\n    duplicate_suppression: duplicate, initial_delivery_state: state,\n    audit_row: outageAuditRow(context, now, 'outage_prepared', state, state, duplicate)};\n}\n\nfunction outageAuditRow(context, now, eventType, slack, gmail, duplicate) {\n  return {orchestration_run_id: context.orchestration_run_id, started_at: context.started_at,\n    completed_at: now, api_service: 'urbaneats-api:8000',\n    attempt_count: context.outage_evidence.attempt_count,\n    failure_category: context.outage_evidence.failure_category, routing_status: 'DATA_FAILURE',\n    test_mode: context.test_mode, duplicate_suppression: duplicate,\n    slack_delivery_state: slack, gmail_delivery_state: gmail, event_type: eventType,\n    evidence_json: JSON.stringify(context.outage_evidence), delivery_channel: '',\n    slack_attempts: 0, gmail_attempts: 0, retry_allowed: false, delivery_error_category: ''};\n}\n\nfunction outageDeliveryRow(context, channel, receipt, attempt, now, skipped = false) {\n  let state = context.initial_delivery_state, category = '', retry = false;\n  if (!skipped) {\n    const ok = channel === 'slack' ? receipt.ok === true && typeof receipt.ts === 'string'\n      : typeof receipt.id === 'string' && !receipt.error;\n    const limited = channel === 'slack'\n      ? receipt.ok === false && ['ratelimited', 'rate_limited'].includes(receipt.error)\n      : receipt.statusCode === 429 || receipt.error?.statusCode === 429;\n    state = ok ? 'SUCCESS' : limited ? 'FAILURE' : 'UNKNOWN';\n    category = ok ? '' : limited ? 'RATE_LIMITED' : 'UNVERIFIED_RECEIPT';\n    retry = limited && attempt < 3;\n  }\n  const row = outageAuditRow(context, now, skipped ? 'delivery_skipped' : 'delivery_attempt',\n    channel === 'slack' ? state : context.initial_delivery_state,\n    channel === 'gmail' ? state : context.initial_delivery_state, context.duplicate_suppression);\n  row.delivery_channel = channel;\n  row[`${channel}_attempts`] = skipped ? 0 : attempt;\n  row.retry_allowed = retry;\n  row.delivery_error_category = category;\n  return row;\n}\n\n\nreturn [{json:outageDeliveryRow($('Restore Outage Context').first().json,'slack',{},0,new Date().toISOString(),true)}];"
+      },
+      "notes": "Phase 3A independent outage path"
+    },
+    {
+      "id": "slack-persist-outage-delivery",
+      "name": "Slack Persist Outage Delivery",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        4760,
+        800
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "={{ $('Prepare Outage Evidence').first().json.claim_table_name }}"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "orchestration_run_id": "={{ $json.orchestration_run_id }}",
+            "started_at": "={{ $json.started_at }}",
+            "completed_at": "={{ $json.completed_at }}",
+            "api_service": "={{ $json.api_service }}",
+            "attempt_count": "={{ $json.attempt_count }}",
+            "failure_category": "={{ $json.failure_category }}",
+            "routing_status": "={{ $json.routing_status }}",
+            "test_mode": "={{ $json.test_mode }}",
+            "duplicate_suppression": "={{ $json.duplicate_suppression }}",
+            "slack_delivery_state": "={{ $json.slack_delivery_state }}",
+            "gmail_delivery_state": "={{ $json.gmail_delivery_state }}",
+            "event_type": "={{ $json.event_type }}",
+            "evidence_json": "={{ $json.evidence_json }}",
+            "delivery_channel": "={{ $json.delivery_channel }}",
+            "slack_attempts": "={{ $json.slack_attempts }}",
+            "gmail_attempts": "={{ $json.gmail_attempts }}",
+            "retry_allowed": "={{ $json.retry_allowed }}",
+            "delivery_error_category": "={{ $json.delivery_error_category }}"
+          },
+          "schema": [
+            {
+              "id": "orchestration_run_id",
+              "displayName": "orchestration_run_id",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "started_at",
+              "displayName": "started_at",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "completed_at",
+              "displayName": "completed_at",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "api_service",
+              "displayName": "api_service",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "attempt_count",
+              "displayName": "attempt_count",
+              "type": "number",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "failure_category",
+              "displayName": "failure_category",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "routing_status",
+              "displayName": "routing_status",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "test_mode",
+              "displayName": "test_mode",
+              "type": "boolean",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "duplicate_suppression",
+              "displayName": "duplicate_suppression",
+              "type": "boolean",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "slack_delivery_state",
+              "displayName": "slack_delivery_state",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "gmail_delivery_state",
+              "displayName": "gmail_delivery_state",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "event_type",
+              "displayName": "event_type",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "evidence_json",
+              "displayName": "evidence_json",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "delivery_channel",
+              "displayName": "delivery_channel",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "slack_attempts",
+              "displayName": "slack_attempts",
+              "type": "number",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "gmail_attempts",
+              "displayName": "gmail_attempts",
+              "type": "number",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "retry_allowed",
+              "displayName": "retry_allowed",
+              "type": "boolean",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "delivery_error_category",
+              "displayName": "delivery_error_category",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "notes": "Phase 3A independent outage path"
+    },
+    {
+      "id": "slack-retry-outage-delivery",
+      "name": "Slack Retry Outage Delivery",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4830,
+        800
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.retry_allowed }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "notes": "Phase 3A independent outage path"
+    },
+    {
+      "id": "slack-outage-retry-delay",
+      "name": "Slack Outage Retry Delay",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        4900,
+        800
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 2,
+        "unit": "seconds"
+      },
+      "notes": "Phase 3A independent outage path"
+    },
+    {
+      "id": "slack-restore-outage-retry",
+      "name": "Slack Restore Outage Retry",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4970,
+        800
+      ],
+      "parameters": {
+        "jsCode": "// Pure orchestration logic, embedded verbatim in the exported n8n Code nodes.\n// It deliberately never copies model data or arbitrary error text into outage evidence.\nfunction classifyApiResponse(response) {\n  const status = Number(response?.statusCode || response?.status || 0);\n  const error = response?.error;\n  if (status >= 500) return {failure_category: 'HTTP_5XX', http_status: status};\n  if (error) {\n    const description = typeof error === 'string' ? error : JSON.stringify(error);\n    if (/ENOTFOUND|EAI_AGAIN|getaddrinfo|incorrect host|name resolution/i.test(description))\n      return {failure_category: 'DNS_SERVICE_FAILURE'};\n    if (/ECONNREFUSED|refused.*connection|connection.*refused/i.test(description))\n      return {failure_category: 'CONNECTION_REFUSED'};\n    if (/ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED|timed?\\s*out|timeout/i.test(description))\n      return {failure_category: 'TIMEOUT'};\n    return {failure_category: 'TRANSPORT_FAILURE'};\n  }\n  if (status && (status < 200 || status >= 300))\n    return {failure_category: 'HTTP_ERROR', http_status: status};\n  // n8n's text response uses `data` even when fullResponse is enabled.\n  let body = response?.body ?? response?.data ?? response;\n  if (typeof body === 'string') {\n    try { body = JSON.parse(body); } catch { return {failure_category: 'MALFORMED_RESPONSE'}; }\n  }\n  const valid = body && ['DATA_FAILURE', 'GREEN_SUMMARY', 'RED_ALERT'].includes(body.routing_status)\n    && /^UE-[0-9a-f]{32}$/.test(body.run_id || '')\n    && body.evidence?.routing_status === body.routing_status\n    && Array.isArray(body.evidence?.facts) && body.evidence.facts.length > 0\n    && typeof body.briefing?.text === 'string';\n  return valid ? {api_response: body} : {failure_category: 'MALFORMED_RESPONSE'};\n}\n\nfunction initializeOrchestration(settings, execution, now) {\n  const override = settings.orchestration_run_id_override || '';\n  const force = settings.force_retry_nonce || '';\n  if ((override && !/^[A-Za-z0-9_-]{1,48}$/.test(override))\n      || (force && !/^[A-Za-z0-9_-]{1,16}$/.test(force))) throw Error('Invalid orchestration identity');\n  const day = new Date(now).toLocaleDateString('en-CA', {timeZone: 'Asia/Kolkata'}).replaceAll('-', '');\n  const base = override || (execution.mode === 'trigger' ? `ORCH-${day}-0730` : `ORCH-${execution.id}`);\n  const id = force ? `${base}-F-${force}` : base;\n  if (!/^[A-Za-z0-9_-]{1,48}$/.test(id)) throw Error('Invalid orchestration identity');\n  return {orchestration_run_id: id, started_at: now, test_mode: settings.test_mode !== false,\n    source_batch_id: /^[A-Za-z0-9_-]{1,100}$/.test(settings.source_batch_id || '')\n      ? settings.source_batch_id : null, claim_table_name: `UE_ORCH_${id}`};\n}\n\nfunction constructOutage(context, failure, now) {\n  const packet = {schema_version: 'orchestration-failure-v1', evidence_origin: 'orchestration',\n    orchestration_run_id: context.orchestration_run_id, generated_at: now,\n    routing_status: 'DATA_FAILURE', failure_stage: 'URBANEATS_API',\n    failure_category: failure.failure_category, attempt_count: failure.attempt_count,\n    api_service: 'urbaneats-api:8000', source_batch_id: context.source_batch_id,\n    test_mode: context.test_mode, notification_required: true,\n    attempts: failure.attempt_history};\n  const text = ['UrbanEats automation failure \u2014 DATA_FAILURE.',\n    'The scoring service could not provide a usable response after bounded attempts.',\n    'No GREEN or RED operational assessment was produced. Manual system review is required.',\n    `Orchestration run: ${packet.orchestration_run_id}; timestamp: ${now};`,\n    `stage: ${packet.failure_stage}; category: ${packet.failure_category};`,\n    `attempts: ${packet.attempt_count}; retries: ${Math.max(0, packet.attempt_count - 1)};`,\n    `source batch: ${packet.source_batch_id ?? 'unavailable'}; evidence origin: orchestration.`].join('\\n');\n  return {orchestration_run_id: context.orchestration_run_id, started_at: context.started_at,\n    test_mode: context.test_mode, source_batch_id: context.source_batch_id,\n    claim_table_name: context.claim_table_name, evidence_origin: 'orchestration', routing_status: 'DATA_FAILURE',\n    outage_evidence: packet, notification_text: text};\n}\n\nfunction claimOutage(nativeResult, context, now) {\n  const owns = typeof nativeResult?.id === 'string' && nativeResult.name === context.claim_table_name;\n  const error = typeof nativeResult?.error === 'string' ? nativeResult.error : JSON.stringify(nativeResult?.error || {});\n  const duplicate = !owns && /already exists|unique constraint|duplicate/i.test(error);\n  const state = duplicate ? 'DUPLICATE_SUPPRESSED' : !owns ? 'CLAIM_FAILED'\n    : context.test_mode ? 'SKIPPED_TEST_MODE' : 'PENDING';\n  return {...context, owns_claim: owns, send: owns && !context.test_mode,\n    duplicate_suppression: duplicate, initial_delivery_state: state,\n    audit_row: outageAuditRow(context, now, 'outage_prepared', state, state, duplicate)};\n}\n\nfunction outageAuditRow(context, now, eventType, slack, gmail, duplicate) {\n  return {orchestration_run_id: context.orchestration_run_id, started_at: context.started_at,\n    completed_at: now, api_service: 'urbaneats-api:8000',\n    attempt_count: context.outage_evidence.attempt_count,\n    failure_category: context.outage_evidence.failure_category, routing_status: 'DATA_FAILURE',\n    test_mode: context.test_mode, duplicate_suppression: duplicate,\n    slack_delivery_state: slack, gmail_delivery_state: gmail, event_type: eventType,\n    evidence_json: JSON.stringify(context.outage_evidence), delivery_channel: '',\n    slack_attempts: 0, gmail_attempts: 0, retry_allowed: false, delivery_error_category: ''};\n}\n\nfunction outageDeliveryRow(context, channel, receipt, attempt, now, skipped = false) {\n  let state = context.initial_delivery_state, category = '', retry = false;\n  if (!skipped) {\n    const ok = channel === 'slack' ? receipt.ok === true && typeof receipt.ts === 'string'\n      : typeof receipt.id === 'string' && !receipt.error;\n    const limited = channel === 'slack'\n      ? receipt.ok === false && ['ratelimited', 'rate_limited'].includes(receipt.error)\n      : receipt.statusCode === 429 || receipt.error?.statusCode === 429;\n    state = ok ? 'SUCCESS' : limited ? 'FAILURE' : 'UNKNOWN';\n    category = ok ? '' : limited ? 'RATE_LIMITED' : 'UNVERIFIED_RECEIPT';\n    retry = limited && attempt < 3;\n  }\n  const row = outageAuditRow(context, now, skipped ? 'delivery_skipped' : 'delivery_attempt',\n    channel === 'slack' ? state : context.initial_delivery_state,\n    channel === 'gmail' ? state : context.initial_delivery_state, context.duplicate_suppression);\n  row.delivery_channel = channel;\n  row[`${channel}_attempts`] = skipped ? 0 : attempt;\n  row.retry_allowed = retry;\n  row.delivery_error_category = category;\n  return row;\n}\n\n\nreturn [{json:$('Restore Outage Context').first().json}];"
+      },
+      "notes": "Phase 3A independent outage path"
+    },
+    {
+      "id": "gmail-is-outage-receipt",
+      "name": "Gmail Is Outage Receipt",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        5040,
+        800
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ !!$json.orchestration_run_id }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "notes": "Phase 3A independent outage path"
+    },
+    {
+      "id": "gmail-is-outage-skip",
+      "name": "Gmail Is Outage Skip",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        5110,
+        800
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.evidence_origin === 'orchestration' }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "notes": "Phase 3A independent outage path"
+    },
+    {
+      "id": "gmail-outage-skipped-record",
+      "name": "Gmail Outage Skipped Record",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5180,
+        800
+      ],
+      "parameters": {
+        "jsCode": "// Pure orchestration logic, embedded verbatim in the exported n8n Code nodes.\n// It deliberately never copies model data or arbitrary error text into outage evidence.\nfunction classifyApiResponse(response) {\n  const status = Number(response?.statusCode || response?.status || 0);\n  const error = response?.error;\n  if (status >= 500) return {failure_category: 'HTTP_5XX', http_status: status};\n  if (error) {\n    const description = typeof error === 'string' ? error : JSON.stringify(error);\n    if (/ENOTFOUND|EAI_AGAIN|getaddrinfo|incorrect host|name resolution/i.test(description))\n      return {failure_category: 'DNS_SERVICE_FAILURE'};\n    if (/ECONNREFUSED|refused.*connection|connection.*refused/i.test(description))\n      return {failure_category: 'CONNECTION_REFUSED'};\n    if (/ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED|timed?\\s*out|timeout/i.test(description))\n      return {failure_category: 'TIMEOUT'};\n    return {failure_category: 'TRANSPORT_FAILURE'};\n  }\n  if (status && (status < 200 || status >= 300))\n    return {failure_category: 'HTTP_ERROR', http_status: status};\n  // n8n's text response uses `data` even when fullResponse is enabled.\n  let body = response?.body ?? response?.data ?? response;\n  if (typeof body === 'string') {\n    try { body = JSON.parse(body); } catch { return {failure_category: 'MALFORMED_RESPONSE'}; }\n  }\n  const valid = body && ['DATA_FAILURE', 'GREEN_SUMMARY', 'RED_ALERT'].includes(body.routing_status)\n    && /^UE-[0-9a-f]{32}$/.test(body.run_id || '')\n    && body.evidence?.routing_status === body.routing_status\n    && Array.isArray(body.evidence?.facts) && body.evidence.facts.length > 0\n    && typeof body.briefing?.text === 'string';\n  return valid ? {api_response: body} : {failure_category: 'MALFORMED_RESPONSE'};\n}\n\nfunction initializeOrchestration(settings, execution, now) {\n  const override = settings.orchestration_run_id_override || '';\n  const force = settings.force_retry_nonce || '';\n  if ((override && !/^[A-Za-z0-9_-]{1,48}$/.test(override))\n      || (force && !/^[A-Za-z0-9_-]{1,16}$/.test(force))) throw Error('Invalid orchestration identity');\n  const day = new Date(now).toLocaleDateString('en-CA', {timeZone: 'Asia/Kolkata'}).replaceAll('-', '');\n  const base = override || (execution.mode === 'trigger' ? `ORCH-${day}-0730` : `ORCH-${execution.id}`);\n  const id = force ? `${base}-F-${force}` : base;\n  if (!/^[A-Za-z0-9_-]{1,48}$/.test(id)) throw Error('Invalid orchestration identity');\n  return {orchestration_run_id: id, started_at: now, test_mode: settings.test_mode !== false,\n    source_batch_id: /^[A-Za-z0-9_-]{1,100}$/.test(settings.source_batch_id || '')\n      ? settings.source_batch_id : null, claim_table_name: `UE_ORCH_${id}`};\n}\n\nfunction constructOutage(context, failure, now) {\n  const packet = {schema_version: 'orchestration-failure-v1', evidence_origin: 'orchestration',\n    orchestration_run_id: context.orchestration_run_id, generated_at: now,\n    routing_status: 'DATA_FAILURE', failure_stage: 'URBANEATS_API',\n    failure_category: failure.failure_category, attempt_count: failure.attempt_count,\n    api_service: 'urbaneats-api:8000', source_batch_id: context.source_batch_id,\n    test_mode: context.test_mode, notification_required: true,\n    attempts: failure.attempt_history};\n  const text = ['UrbanEats automation failure \u2014 DATA_FAILURE.',\n    'The scoring service could not provide a usable response after bounded attempts.',\n    'No GREEN or RED operational assessment was produced. Manual system review is required.',\n    `Orchestration run: ${packet.orchestration_run_id}; timestamp: ${now};`,\n    `stage: ${packet.failure_stage}; category: ${packet.failure_category};`,\n    `attempts: ${packet.attempt_count}; retries: ${Math.max(0, packet.attempt_count - 1)};`,\n    `source batch: ${packet.source_batch_id ?? 'unavailable'}; evidence origin: orchestration.`].join('\\n');\n  return {orchestration_run_id: context.orchestration_run_id, started_at: context.started_at,\n    test_mode: context.test_mode, source_batch_id: context.source_batch_id,\n    claim_table_name: context.claim_table_name, evidence_origin: 'orchestration', routing_status: 'DATA_FAILURE',\n    outage_evidence: packet, notification_text: text};\n}\n\nfunction claimOutage(nativeResult, context, now) {\n  const owns = typeof nativeResult?.id === 'string' && nativeResult.name === context.claim_table_name;\n  const error = typeof nativeResult?.error === 'string' ? nativeResult.error : JSON.stringify(nativeResult?.error || {});\n  const duplicate = !owns && /already exists|unique constraint|duplicate/i.test(error);\n  const state = duplicate ? 'DUPLICATE_SUPPRESSED' : !owns ? 'CLAIM_FAILED'\n    : context.test_mode ? 'SKIPPED_TEST_MODE' : 'PENDING';\n  return {...context, owns_claim: owns, send: owns && !context.test_mode,\n    duplicate_suppression: duplicate, initial_delivery_state: state,\n    audit_row: outageAuditRow(context, now, 'outage_prepared', state, state, duplicate)};\n}\n\nfunction outageAuditRow(context, now, eventType, slack, gmail, duplicate) {\n  return {orchestration_run_id: context.orchestration_run_id, started_at: context.started_at,\n    completed_at: now, api_service: 'urbaneats-api:8000',\n    attempt_count: context.outage_evidence.attempt_count,\n    failure_category: context.outage_evidence.failure_category, routing_status: 'DATA_FAILURE',\n    test_mode: context.test_mode, duplicate_suppression: duplicate,\n    slack_delivery_state: slack, gmail_delivery_state: gmail, event_type: eventType,\n    evidence_json: JSON.stringify(context.outage_evidence), delivery_channel: '',\n    slack_attempts: 0, gmail_attempts: 0, retry_allowed: false, delivery_error_category: ''};\n}\n\nfunction outageDeliveryRow(context, channel, receipt, attempt, now, skipped = false) {\n  let state = context.initial_delivery_state, category = '', retry = false;\n  if (!skipped) {\n    const ok = channel === 'slack' ? receipt.ok === true && typeof receipt.ts === 'string'\n      : typeof receipt.id === 'string' && !receipt.error;\n    const limited = channel === 'slack'\n      ? receipt.ok === false && ['ratelimited', 'rate_limited'].includes(receipt.error)\n      : receipt.statusCode === 429 || receipt.error?.statusCode === 429;\n    state = ok ? 'SUCCESS' : limited ? 'FAILURE' : 'UNKNOWN';\n    category = ok ? '' : limited ? 'RATE_LIMITED' : 'UNVERIFIED_RECEIPT';\n    retry = limited && attempt < 3;\n  }\n  const row = outageAuditRow(context, now, skipped ? 'delivery_skipped' : 'delivery_attempt',\n    channel === 'slack' ? state : context.initial_delivery_state,\n    channel === 'gmail' ? state : context.initial_delivery_state, context.duplicate_suppression);\n  row.delivery_channel = channel;\n  row[`${channel}_attempts`] = skipped ? 0 : attempt;\n  row.retry_allowed = retry;\n  row.delivery_error_category = category;\n  return row;\n}\n\n\nreturn [{json:outageDeliveryRow($('Restore Outage Context').first().json,'gmail',{},0,new Date().toISOString(),true)}];"
+      },
+      "notes": "Phase 3A independent outage path"
+    },
+    {
+      "id": "gmail-persist-outage-delivery",
+      "name": "Gmail Persist Outage Delivery",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        5250,
+        800
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "={{ $('Prepare Outage Evidence').first().json.claim_table_name }}"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "orchestration_run_id": "={{ $json.orchestration_run_id }}",
+            "started_at": "={{ $json.started_at }}",
+            "completed_at": "={{ $json.completed_at }}",
+            "api_service": "={{ $json.api_service }}",
+            "attempt_count": "={{ $json.attempt_count }}",
+            "failure_category": "={{ $json.failure_category }}",
+            "routing_status": "={{ $json.routing_status }}",
+            "test_mode": "={{ $json.test_mode }}",
+            "duplicate_suppression": "={{ $json.duplicate_suppression }}",
+            "slack_delivery_state": "={{ $json.slack_delivery_state }}",
+            "gmail_delivery_state": "={{ $json.gmail_delivery_state }}",
+            "event_type": "={{ $json.event_type }}",
+            "evidence_json": "={{ $json.evidence_json }}",
+            "delivery_channel": "={{ $json.delivery_channel }}",
+            "slack_attempts": "={{ $json.slack_attempts }}",
+            "gmail_attempts": "={{ $json.gmail_attempts }}",
+            "retry_allowed": "={{ $json.retry_allowed }}",
+            "delivery_error_category": "={{ $json.delivery_error_category }}"
+          },
+          "schema": [
+            {
+              "id": "orchestration_run_id",
+              "displayName": "orchestration_run_id",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "started_at",
+              "displayName": "started_at",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "completed_at",
+              "displayName": "completed_at",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "api_service",
+              "displayName": "api_service",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "attempt_count",
+              "displayName": "attempt_count",
+              "type": "number",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "failure_category",
+              "displayName": "failure_category",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "routing_status",
+              "displayName": "routing_status",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "test_mode",
+              "displayName": "test_mode",
+              "type": "boolean",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "duplicate_suppression",
+              "displayName": "duplicate_suppression",
+              "type": "boolean",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "slack_delivery_state",
+              "displayName": "slack_delivery_state",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "gmail_delivery_state",
+              "displayName": "gmail_delivery_state",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "event_type",
+              "displayName": "event_type",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "evidence_json",
+              "displayName": "evidence_json",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "delivery_channel",
+              "displayName": "delivery_channel",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "slack_attempts",
+              "displayName": "slack_attempts",
+              "type": "number",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "gmail_attempts",
+              "displayName": "gmail_attempts",
+              "type": "number",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "retry_allowed",
+              "displayName": "retry_allowed",
+              "type": "boolean",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "delivery_error_category",
+              "displayName": "delivery_error_category",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "notes": "Phase 3A independent outage path"
+    },
+    {
+      "id": "gmail-retry-outage-delivery",
+      "name": "Gmail Retry Outage Delivery",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        5320,
+        800
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.retry_allowed }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "notes": "Phase 3A independent outage path"
+    },
+    {
+      "id": "gmail-outage-retry-delay",
+      "name": "Gmail Outage Retry Delay",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        5390,
+        800
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 2,
+        "unit": "seconds"
+      },
+      "notes": "Phase 3A independent outage path"
+    },
+    {
+      "id": "gmail-restore-outage-retry",
+      "name": "Gmail Restore Outage Retry",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5460,
+        800
+      ],
+      "parameters": {
+        "jsCode": "// Pure orchestration logic, embedded verbatim in the exported n8n Code nodes.\n// It deliberately never copies model data or arbitrary error text into outage evidence.\nfunction classifyApiResponse(response) {\n  const status = Number(response?.statusCode || response?.status || 0);\n  const error = response?.error;\n  if (status >= 500) return {failure_category: 'HTTP_5XX', http_status: status};\n  if (error) {\n    const description = typeof error === 'string' ? error : JSON.stringify(error);\n    if (/ENOTFOUND|EAI_AGAIN|getaddrinfo|incorrect host|name resolution/i.test(description))\n      return {failure_category: 'DNS_SERVICE_FAILURE'};\n    if (/ECONNREFUSED|refused.*connection|connection.*refused/i.test(description))\n      return {failure_category: 'CONNECTION_REFUSED'};\n    if (/ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED|timed?\\s*out|timeout/i.test(description))\n      return {failure_category: 'TIMEOUT'};\n    return {failure_category: 'TRANSPORT_FAILURE'};\n  }\n  if (status && (status < 200 || status >= 300))\n    return {failure_category: 'HTTP_ERROR', http_status: status};\n  // n8n's text response uses `data` even when fullResponse is enabled.\n  let body = response?.body ?? response?.data ?? response;\n  if (typeof body === 'string') {\n    try { body = JSON.parse(body); } catch { return {failure_category: 'MALFORMED_RESPONSE'}; }\n  }\n  const valid = body && ['DATA_FAILURE', 'GREEN_SUMMARY', 'RED_ALERT'].includes(body.routing_status)\n    && /^UE-[0-9a-f]{32}$/.test(body.run_id || '')\n    && body.evidence?.routing_status === body.routing_status\n    && Array.isArray(body.evidence?.facts) && body.evidence.facts.length > 0\n    && typeof body.briefing?.text === 'string';\n  return valid ? {api_response: body} : {failure_category: 'MALFORMED_RESPONSE'};\n}\n\nfunction initializeOrchestration(settings, execution, now) {\n  const override = settings.orchestration_run_id_override || '';\n  const force = settings.force_retry_nonce || '';\n  if ((override && !/^[A-Za-z0-9_-]{1,48}$/.test(override))\n      || (force && !/^[A-Za-z0-9_-]{1,16}$/.test(force))) throw Error('Invalid orchestration identity');\n  const day = new Date(now).toLocaleDateString('en-CA', {timeZone: 'Asia/Kolkata'}).replaceAll('-', '');\n  const base = override || (execution.mode === 'trigger' ? `ORCH-${day}-0730` : `ORCH-${execution.id}`);\n  const id = force ? `${base}-F-${force}` : base;\n  if (!/^[A-Za-z0-9_-]{1,48}$/.test(id)) throw Error('Invalid orchestration identity');\n  return {orchestration_run_id: id, started_at: now, test_mode: settings.test_mode !== false,\n    source_batch_id: /^[A-Za-z0-9_-]{1,100}$/.test(settings.source_batch_id || '')\n      ? settings.source_batch_id : null, claim_table_name: `UE_ORCH_${id}`};\n}\n\nfunction constructOutage(context, failure, now) {\n  const packet = {schema_version: 'orchestration-failure-v1', evidence_origin: 'orchestration',\n    orchestration_run_id: context.orchestration_run_id, generated_at: now,\n    routing_status: 'DATA_FAILURE', failure_stage: 'URBANEATS_API',\n    failure_category: failure.failure_category, attempt_count: failure.attempt_count,\n    api_service: 'urbaneats-api:8000', source_batch_id: context.source_batch_id,\n    test_mode: context.test_mode, notification_required: true,\n    attempts: failure.attempt_history};\n  const text = ['UrbanEats automation failure \u2014 DATA_FAILURE.',\n    'The scoring service could not provide a usable response after bounded attempts.',\n    'No GREEN or RED operational assessment was produced. Manual system review is required.',\n    `Orchestration run: ${packet.orchestration_run_id}; timestamp: ${now};`,\n    `stage: ${packet.failure_stage}; category: ${packet.failure_category};`,\n    `attempts: ${packet.attempt_count}; retries: ${Math.max(0, packet.attempt_count - 1)};`,\n    `source batch: ${packet.source_batch_id ?? 'unavailable'}; evidence origin: orchestration.`].join('\\n');\n  return {orchestration_run_id: context.orchestration_run_id, started_at: context.started_at,\n    test_mode: context.test_mode, source_batch_id: context.source_batch_id,\n    claim_table_name: context.claim_table_name, evidence_origin: 'orchestration', routing_status: 'DATA_FAILURE',\n    outage_evidence: packet, notification_text: text};\n}\n\nfunction claimOutage(nativeResult, context, now) {\n  const owns = typeof nativeResult?.id === 'string' && nativeResult.name === context.claim_table_name;\n  const error = typeof nativeResult?.error === 'string' ? nativeResult.error : JSON.stringify(nativeResult?.error || {});\n  const duplicate = !owns && /already exists|unique constraint|duplicate/i.test(error);\n  const state = duplicate ? 'DUPLICATE_SUPPRESSED' : !owns ? 'CLAIM_FAILED'\n    : context.test_mode ? 'SKIPPED_TEST_MODE' : 'PENDING';\n  return {...context, owns_claim: owns, send: owns && !context.test_mode,\n    duplicate_suppression: duplicate, initial_delivery_state: state,\n    audit_row: outageAuditRow(context, now, 'outage_prepared', state, state, duplicate)};\n}\n\nfunction outageAuditRow(context, now, eventType, slack, gmail, duplicate) {\n  return {orchestration_run_id: context.orchestration_run_id, started_at: context.started_at,\n    completed_at: now, api_service: 'urbaneats-api:8000',\n    attempt_count: context.outage_evidence.attempt_count,\n    failure_category: context.outage_evidence.failure_category, routing_status: 'DATA_FAILURE',\n    test_mode: context.test_mode, duplicate_suppression: duplicate,\n    slack_delivery_state: slack, gmail_delivery_state: gmail, event_type: eventType,\n    evidence_json: JSON.stringify(context.outage_evidence), delivery_channel: '',\n    slack_attempts: 0, gmail_attempts: 0, retry_allowed: false, delivery_error_category: ''};\n}\n\nfunction outageDeliveryRow(context, channel, receipt, attempt, now, skipped = false) {\n  let state = context.initial_delivery_state, category = '', retry = false;\n  if (!skipped) {\n    const ok = channel === 'slack' ? receipt.ok === true && typeof receipt.ts === 'string'\n      : typeof receipt.id === 'string' && !receipt.error;\n    const limited = channel === 'slack'\n      ? receipt.ok === false && ['ratelimited', 'rate_limited'].includes(receipt.error)\n      : receipt.statusCode === 429 || receipt.error?.statusCode === 429;\n    state = ok ? 'SUCCESS' : limited ? 'FAILURE' : 'UNKNOWN';\n    category = ok ? '' : limited ? 'RATE_LIMITED' : 'UNVERIFIED_RECEIPT';\n    retry = limited && attempt < 3;\n  }\n  const row = outageAuditRow(context, now, skipped ? 'delivery_skipped' : 'delivery_attempt',\n    channel === 'slack' ? state : context.initial_delivery_state,\n    channel === 'gmail' ? state : context.initial_delivery_state, context.duplicate_suppression);\n  row.delivery_channel = channel;\n  row[`${channel}_attempts`] = skipped ? 0 : attempt;\n  row.retry_allowed = retry;\n  row.delivery_error_category = category;\n  return row;\n}\n\n\nreturn [{json:$('Restore Outage Context').first().json}];"
+      },
+      "notes": "Phase 3A independent outage path"
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Orchestration Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Orchestration Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Acquire Current Batch": {
+      "main": [
+        [
+          {
+            "node": "Call UrbanEats API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call UrbanEats API": {
+      "main": [
+        [
+          {
+            "node": "Validate API Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate API Response": {
+      "main": [
+        [
+          {
+            "node": "Retry API Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Status": {
+      "main": [
+        [
+          {
+            "node": "Failure Brief",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Brief",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Evidence and Validated LLM Brief",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Failure Brief": {
+      "main": [
+        [
+          {
+            "node": "Slack Claim DATA_FAILURE",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gmail Claim DATA_FAILURE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Claim DATA_FAILURE": {
+      "main": [
+        [
+          {
+            "node": "Slack Send Enabled DATA_FAILURE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Send Enabled DATA_FAILURE": {
+      "main": [
+        [
+          {
+            "node": "Slack DATA_FAILURE",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Slack Is Outage Skip",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack DATA_FAILURE": {
+      "main": [
+        [
+          {
+            "node": "Slack Receipt DATA_FAILURE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Receipt DATA_FAILURE": {
+      "main": [
+        [
+          {
+            "node": "Slack Is Outage Receipt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Claim DATA_FAILURE": {
+      "main": [
+        [
+          {
+            "node": "Gmail Send Enabled DATA_FAILURE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Send Enabled DATA_FAILURE": {
+      "main": [
+        [
+          {
+            "node": "Gmail DATA_FAILURE",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Gmail Is Outage Skip",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail DATA_FAILURE": {
+      "main": [
+        [
+          {
+            "node": "Gmail Receipt DATA_FAILURE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Receipt DATA_FAILURE": {
+      "main": [
+        [
+          {
+            "node": "Gmail Is Outage Receipt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Brief": {
+      "main": [
+        [
+          {
+            "node": "Slack Claim GREEN_SUMMARY",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gmail Claim GREEN_SUMMARY",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Claim GREEN_SUMMARY": {
+      "main": [
+        [
+          {
+            "node": "Slack Send Enabled GREEN_SUMMARY",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Send Enabled GREEN_SUMMARY": {
+      "main": [
+        [
+          {
+            "node": "Slack GREEN_SUMMARY",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack GREEN_SUMMARY": {
+      "main": [
+        [
+          {
+            "node": "Slack Receipt GREEN_SUMMARY",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Receipt GREEN_SUMMARY": {
+      "main": [
+        [
+          {
+            "node": "Slack Delivery Log GREEN_SUMMARY",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Claim GREEN_SUMMARY": {
+      "main": [
+        [
+          {
+            "node": "Gmail Send Enabled GREEN_SUMMARY",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Send Enabled GREEN_SUMMARY": {
+      "main": [
+        [
+          {
+            "node": "Gmail GREEN_SUMMARY",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail GREEN_SUMMARY": {
+      "main": [
+        [
+          {
+            "node": "Gmail Receipt GREEN_SUMMARY",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Receipt GREEN_SUMMARY": {
+      "main": [
+        [
+          {
+            "node": "Gmail Delivery Log GREEN_SUMMARY",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Evidence and Validated LLM Brief": {
+      "main": [
+        [
+          {
+            "node": "Slack Claim RED_ALERT",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gmail Claim RED_ALERT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Claim RED_ALERT": {
+      "main": [
+        [
+          {
+            "node": "Slack Send Enabled RED_ALERT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Send Enabled RED_ALERT": {
+      "main": [
+        [
+          {
+            "node": "Slack RED_ALERT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack RED_ALERT": {
+      "main": [
+        [
+          {
+            "node": "Slack Receipt RED_ALERT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Receipt RED_ALERT": {
+      "main": [
+        [
+          {
+            "node": "Slack Delivery Log RED_ALERT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Claim RED_ALERT": {
+      "main": [
+        [
+          {
+            "node": "Gmail Send Enabled RED_ALERT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Send Enabled RED_ALERT": {
+      "main": [
+        [
+          {
+            "node": "Gmail RED_ALERT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail RED_ALERT": {
+      "main": [
+        [
+          {
+            "node": "Gmail Receipt RED_ALERT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Receipt RED_ALERT": {
+      "main": [
+        [
+          {
+            "node": "Gmail Delivery Log RED_ALERT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Audit Available": {
+      "main": [
+        [
+          {
+            "node": "Route Status",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Outage Evidence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Delivery Log DATA_FAILURE": {
+      "main": [
+        [
+          {
+            "node": "Slack Retry Allowed DATA_FAILURE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Retry Allowed DATA_FAILURE": {
+      "main": [
+        [
+          {
+            "node": "Slack Retry Delay DATA_FAILURE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Retry Delay DATA_FAILURE": {
+      "main": [
+        [
+          {
+            "node": "Slack DATA_FAILURE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Delivery Log DATA_FAILURE": {
+      "main": [
+        [
+          {
+            "node": "Gmail Retry Allowed DATA_FAILURE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Retry Allowed DATA_FAILURE": {
+      "main": [
+        [
+          {
+            "node": "Gmail Retry Delay DATA_FAILURE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Retry Delay DATA_FAILURE": {
+      "main": [
+        [
+          {
+            "node": "Gmail DATA_FAILURE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Delivery Log GREEN_SUMMARY": {
+      "main": [
+        [
+          {
+            "node": "Slack Retry Allowed GREEN_SUMMARY",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Retry Allowed GREEN_SUMMARY": {
+      "main": [
+        [
+          {
+            "node": "Slack Retry Delay GREEN_SUMMARY",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Retry Delay GREEN_SUMMARY": {
+      "main": [
+        [
+          {
+            "node": "Slack GREEN_SUMMARY",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Delivery Log GREEN_SUMMARY": {
+      "main": [
+        [
+          {
+            "node": "Gmail Retry Allowed GREEN_SUMMARY",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Retry Allowed GREEN_SUMMARY": {
+      "main": [
+        [
+          {
+            "node": "Gmail Retry Delay GREEN_SUMMARY",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Retry Delay GREEN_SUMMARY": {
+      "main": [
+        [
+          {
+            "node": "Gmail GREEN_SUMMARY",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Delivery Log RED_ALERT": {
+      "main": [
+        [
+          {
+            "node": "Slack Retry Allowed RED_ALERT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Retry Allowed RED_ALERT": {
+      "main": [
+        [
+          {
+            "node": "Slack Retry Delay RED_ALERT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Retry Delay RED_ALERT": {
+      "main": [
+        [
+          {
+            "node": "Slack RED_ALERT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Delivery Log RED_ALERT": {
+      "main": [
+        [
+          {
+            "node": "Gmail Retry Allowed RED_ALERT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Retry Allowed RED_ALERT": {
+      "main": [
+        [
+          {
+            "node": "Gmail Retry Delay RED_ALERT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Retry Delay RED_ALERT": {
+      "main": [
+        [
+          {
+            "node": "Gmail RED_ALERT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Orchestration Settings": {
+      "main": [
+        [
+          {
+            "node": "Initialize Orchestration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Initialize Orchestration": {
+      "main": [
+        [
+          {
+            "node": "Acquire Current Batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Retry API Request": {
+      "main": [
+        [
+          {
+            "node": "API Retry Delay",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Audit Available",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "API Retry Delay": {
+      "main": [
+        [
+          {
+            "node": "Call UrbanEats API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Outage Evidence": {
+      "main": [
+        [
+          {
+            "node": "Claim Orchestration Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim Orchestration Run": {
+      "main": [
+        [
+          {
+            "node": "Determine Outage Claim",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Determine Outage Claim": {
+      "main": [
+        [
+          {
+            "node": "Initial Outage Audit Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Initial Outage Audit Record": {
+      "main": [
+        [
+          {
+            "node": "Persist Outage Evidence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Persist Outage Evidence": {
+      "main": [
+        [
+          {
+            "node": "Restore Outage Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore Outage Context": {
+      "main": [
+        [
+          {
+            "node": "Slack Send Enabled DATA_FAILURE",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gmail Send Enabled DATA_FAILURE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Outage Delivery States": {
+      "main": [
+        [
+          {
+            "node": "Complete Outage Audit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Complete Outage Audit": {
+      "main": [
+        [
+          {
+            "node": "Persist Completed Outage Audit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Is Outage Receipt": {
+      "main": [
+        [
+          {
+            "node": "Slack Persist Outage Delivery",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Slack Delivery Log DATA_FAILURE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Is Outage Skip": {
+      "main": [
+        [
+          {
+            "node": "Slack Outage Skipped Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Outage Skipped Record": {
+      "main": [
+        [
+          {
+            "node": "Slack Persist Outage Delivery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Persist Outage Delivery": {
+      "main": [
+        [
+          {
+            "node": "Slack Retry Outage Delivery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Retry Outage Delivery": {
+      "main": [
+        [
+          {
+            "node": "Slack Outage Retry Delay",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge Outage Delivery States",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Outage Retry Delay": {
+      "main": [
+        [
+          {
+            "node": "Slack Restore Outage Retry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Restore Outage Retry": {
+      "main": [
+        [
+          {
+            "node": "Slack DATA_FAILURE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Is Outage Receipt": {
+      "main": [
+        [
+          {
+            "node": "Gmail Persist Outage Delivery",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Gmail Delivery Log DATA_FAILURE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Is Outage Skip": {
+      "main": [
+        [
+          {
+            "node": "Gmail Outage Skipped Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Outage Skipped Record": {
+      "main": [
+        [
+          {
+            "node": "Gmail Persist Outage Delivery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Persist Outage Delivery": {
+      "main": [
+        [
+          {
+            "node": "Gmail Retry Outage Delivery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Retry Outage Delivery": {
+      "main": [
+        [
+          {
+            "node": "Gmail Outage Retry Delay",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge Outage Delivery States",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Gmail Outage Retry Delay": {
+      "main": [
+        [
+          {
+            "node": "Gmail Restore Outage Retry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Restore Outage Retry": {
+      "main": [
+        [
+          {
+            "node": "Gmail DATA_FAILURE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
