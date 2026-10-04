@@ -1,0 +1,52 @@
+services:
+  urbaneats-api:
+    build:
+      context: ..
+      dockerfile: docker/runtime.Dockerfile
+    environment:
+      URBANEATS_MODEL_DIR: /app/artifacts/model
+      URBANEATS_SOURCE_FILE: /app/data/current_batch.json
+      URBANEATS_RUNS_DIR: /app/runs
+      TEST_MODE: ${TEST_MODE:-true}
+      LLM_PROVIDER: ${LLM_PROVIDER:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: ${GROQ_MODEL:-}
+      GROQ_BASE_URL: ${GROQ_BASE_URL:-}
+      TZ: Asia/Kolkata
+    volumes:
+      - ../data:/app/data:ro
+      - ../runs:/app/runs
+    ports:
+      - "127.0.0.1:8000:8000"
+    networks: [urbaneats]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      interval: 15s
+      timeout: 6s
+      retries: 3
+      start_period: 30s
+  n8n:
+    profiles: [managed-n8n]
+    image: ${N8N_IMAGE:-docker.n8n.io/n8nio/n8n@sha256:87e0bab2c93192e8dd885ff7b0697c22a1bd97489568a8c67cc140fd7dbb342d}
+    environment:
+      GENERIC_TIMEZONE: Asia/Kolkata
+      TZ: Asia/Kolkata
+    ports:
+      - "127.0.0.1:5678:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+    depends_on:
+      urbaneats-api:
+        condition: service_healthy
+    networks: [urbaneats]
+networks:
+  urbaneats:
+    name: urbaneats_private
+    driver: bridge
+volumes:
+  n8n_data:
+    external: true
+    name: n8n_data

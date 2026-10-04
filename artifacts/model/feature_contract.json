@@ -1,0 +1,27 @@
+{
+  "version": "checkout-v1",
+  "prediction_point": "placement after finalized checkout, before fulfillment",
+  "features": [
+    "restaurant_name",
+    "delivery_zone",
+    "payment_method",
+    "order_value",
+    "discount_applied"
+  ],
+  "excluded": [
+    "cancel_probability",
+    "cancel_risk",
+    "cancellation_probability",
+    "customer_complaints",
+    "delivery_time_mins",
+    "order_id",
+    "order_status",
+    "rider_rating",
+    "target"
+  ],
+  "target": "Cancelled=1, Delivered=0; conditional on these two terminal outcomes",
+  "limitations": "Synthetic final export; no horizon/as-of snapshots; uncalibrated exploratory score",
+  "currency": "INR",
+  "discount_unit": "INR per original README; source owner must confirm before production",
+  "calendar_features": "Omitted: small sample and no incremental justification"
+}

@@ -1,0 +1,1387 @@
+{
+  "name": "UrbanEats Phase 3C - channel policy and grounded briefing",
+  "active": false,
+  "nodes": [
+    {
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "30 7 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "manual-trigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        260,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "settings",
+      "name": "Settings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        0
+      ],
+      "parameters": {
+        "jsCode": "\nconst settings={test_mode:true, orchestration_run_id_override:'', force_retry_nonce:'', source_batch_id:''};\nreturn [{json:{...settings,started_at:new Date().toISOString()}}];\n"
+      }
+    },
+    {
+      "id": "call-urbaneats-api",
+      "name": "Call UrbanEats API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        780,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://urbaneats-api:8000/process-current",
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "text",
+              "neverError": true
+            }
+          }
+        }
+      },
+      "retryOnFail": false,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "normalize-response",
+      "name": "Normalize Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Pure orchestration logic, embedded verbatim in the exported n8n Code nodes.\n// It deliberately never copies model data or arbitrary error text into outage evidence.\nfunction classifyApiResponse(response) {\n  const status = Number(response?.statusCode || response?.status || 0);\n  const error = response?.error;\n  if (status >= 500) return {failure_category: 'HTTP_5XX', http_status: status};\n  if (error) {\n    const description = typeof error === 'string' ? error : JSON.stringify(error);\n    if (/ENOTFOUND|EAI_AGAIN|getaddrinfo|incorrect host|name resolution/i.test(description))\n      return {failure_category: 'DNS_SERVICE_FAILURE'};\n    if (/ECONNREFUSED|refused.*connection|connection.*refused/i.test(description))\n      return {failure_category: 'CONNECTION_REFUSED'};\n    if (/ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED|timed?\\s*out|timeout/i.test(description))\n      return {failure_category: 'TIMEOUT'};\n    return {failure_category: 'TRANSPORT_FAILURE'};\n  }\n  if (status && (status < 200 || status >= 300))\n    return {failure_category: 'HTTP_ERROR', http_status: status};\n  // n8n's text response uses `data` even when fullResponse is enabled.\n  let body = response?.body ?? response?.data ?? response;\n  if (typeof body === 'string') {\n    try { body = JSON.parse(body); } catch { return {failure_category: 'MALFORMED_RESPONSE'}; }\n  }\n  const valid = body && ['DATA_FAILURE', 'GREEN_SUMMARY', 'RED_ALERT'].includes(body.routing_status)\n    && /^UE-[0-9a-f]{32}$/.test(body.run_id || '')\n    && body.evidence?.routing_status === body.routing_status\n    && Array.isArray(body.evidence?.facts) && body.evidence.facts.length > 0\n    && typeof body.briefing?.text === 'string';\n  return valid ? {api_response: body} : {failure_category: 'MALFORMED_RESPONSE'};\n}\n\nfunction initializeOrchestration(settings, execution, now) {\n  const override = settings.orchestration_run_id_override || '';\n  const force = settings.force_retry_nonce || '';\n  if ((override && !/^[A-Za-z0-9_-]{1,48}$/.test(override))\n      || (force && !/^[A-Za-z0-9_-]{1,16}$/.test(force))) throw Error('Invalid orchestration identity');\n  const day = new Date(now).toLocaleDateString('en-CA', {timeZone: 'Asia/Kolkata'}).replaceAll('-', '');\n  const base = override || (execution.mode === 'trigger' ? `ORCH-${day}-0730` : `ORCH-${execution.id}`);\n  const id = force ? `${base}-F-${force}` : base;\n  if (!/^[A-Za-z0-9_-]{1,48}$/.test(id)) throw Error('Invalid orchestration identity');\n  return {orchestration_run_id: id, started_at: now, test_mode: settings.test_mode !== false,\n    source_batch_id: /^[A-Za-z0-9_-]{1,100}$/.test(settings.source_batch_id || '')\n      ? settings.source_batch_id : null, claim_table_name: `UE_ORCH_${id}`};\n}\n\nfunction constructOutage(context, failure, now) {\n  const packet = {schema_version: 'orchestration-failure-v1', evidence_origin: 'orchestration',\n    orchestration_run_id: context.orchestration_run_id, generated_at: now,\n    routing_status: 'DATA_FAILURE', failure_stage: 'URBANEATS_API',\n    failure_category: failure.failure_category, attempt_count: failure.attempt_count,\n    api_service: 'urbaneats-api:8000', source_batch_id: context.source_batch_id,\n    test_mode: context.test_mode, notification_required: true,\n    attempts: failure.attempt_history};\n  const text = ['UrbanEats automation failure - DATA_FAILURE.',\n    'The scoring service could not provide a usable response after bounded attempts.',\n    'No GREEN or RED operational assessment was produced. Manual system review is required.',\n    `Orchestration run: ${packet.orchestration_run_id}; timestamp: ${now};`,\n    `stage: ${packet.failure_stage}; category: ${packet.failure_category};`,\n    `attempts: ${packet.attempt_count}; retries: ${Math.max(0, packet.attempt_count - 1)};`,\n    `source batch: ${packet.source_batch_id ?? 'unavailable'}; evidence origin: orchestration.`].join('\\n');\n  return {orchestration_run_id: context.orchestration_run_id, started_at: context.started_at,\n    test_mode: context.test_mode, source_batch_id: context.source_batch_id,\n    claim_table_name: context.claim_table_name, evidence_origin: 'orchestration', routing_status: 'DATA_FAILURE',\n    outage_evidence: packet, notification_text: text};\n}\n\n\n// Shared portfolio orchestration. API business/model evidence is never recomputed.\nfunction identityHash(text) {\n  // SHA-256 keeps arbitrary source identities out of native table names.\n  const bytes = Array.from(unescape(encodeURIComponent(text)), c => c.charCodeAt(0));\n  const length = bytes.length * 8;\n  bytes.push(128);\n  while (bytes.length % 64 !== 56) bytes.push(0);\n  bytes.push(0, 0, 0, 0, (length >>> 24) & 255, (length >>> 16) & 255,\n    (length >>> 8) & 255, length & 255);\n  const primes = [], initial = [], constants = [];\n  for (let n = 2; primes.length < 64; n++) {\n    if (primes.some(p => n % p === 0)) continue;\n    primes.push(n);\n    if (initial.length < 8) initial.push((Math.sqrt(n) % 1 * 2 ** 32) | 0);\n    constants.push((Math.cbrt(n) % 1 * 2 ** 32) | 0);\n  }\n  const rotate = (n, b) => (n >>> b) | (n << (32 - b));\n  let hash = initial;\n  for (let offset = 0; offset < bytes.length; offset += 64) {\n    const w = [];\n    for (let i = 0; i < 64; i++) {\n      if (i < 16) {\n        const p = offset + i * 4;\n        w[i] = (bytes[p] << 24) | (bytes[p + 1] << 16) | (bytes[p + 2] << 8) | bytes[p + 3];\n      } else {\n        const x = w[i - 15], y = w[i - 2];\n        w[i] = (w[i - 16] + (rotate(x, 7) ^ rotate(x, 18) ^ (x >>> 3))\n          + w[i - 7] + (rotate(y, 17) ^ rotate(y, 19) ^ (y >>> 10))) | 0;\n      }\n    }\n    let [a, b, c, d, e, f, g, h] = hash;\n    for (let i = 0; i < 64; i++) {\n      const t1 = (h + (rotate(e, 6) ^ rotate(e, 11) ^ rotate(e, 25))\n        + ((e & f) ^ (~e & g)) + constants[i] + w[i]) | 0;\n      const t2 = ((rotate(a, 2) ^ rotate(a, 13) ^ rotate(a, 22))\n        + ((a & b) ^ (a & c) ^ (b & c))) | 0;\n      [a, b, c, d, e, f, g, h] = [(t1 + t2) | 0, a, b, c, (d + t1) | 0, e, f, g];\n    }\n    hash = hash.map((v, i) => (v + [a, b, c, d, e, f, g, h][i]) | 0);\n  }\n  return hash.map(v => (v >>> 0).toString(16).padStart(8, '0')).join('');\n}\n\nfunction normalizeNotification(response, settings, execution, attempt, previous, now) {\n  const context = initializeOrchestration(settings, execution, settings.started_at || now);\n  const classified = classifyApiResponse(response);\n  const attempts = [...previous, {attempt, at: now,\n    category: classified.failure_category || 'API_RESPONSE', http_status: classified.http_status || null}];\n  if (!classified.api_response && attempt < 3 && classified.failure_category !== 'HTTP_ERROR')\n    return {retry_api: true, attempt_count: attempt, attempt_history: attempts};\n  const api = classified.api_response;\n  const outage = api ? null : constructOutage(context,\n    {...classified, attempt_count: attempt, attempt_history: attempts}, now);\n  const evidence = api ? api.evidence : outage.outage_evidence;\n  const source = api ? api.source_batch_id || evidence.source_batch_id : context.source_batch_id;\n  const origin = api ? 'api' : 'orchestration';\n  // API batches deduplicate across different API run IDs; outages retain Phase-3A identities.\n  const identity = api ? `batch:${source || evidence.source_sha256 || api.run_id}`\n    : `outage:${context.orchestration_run_id}`;\n  const force = settings.force_retry_nonce || '';\n  const claim = api ? `UE_NOTIFY_${identityHash(identity + (force ? ':force:' + force : ''))}`\n    : context.claim_table_name; // preserves Phase-3A outage claims across upgrade\n  return {retry_api: false, attempt_count: attempt, attempt_history: attempts,\n    orchestration_run_id: context.orchestration_run_id, started_at: context.started_at,\n    test_mode: context.test_mode, source_batch_id: source || null, claim_table_name: claim,\n    evidence_origin: origin, routing_status: api ? api.routing_status : 'DATA_FAILURE',\n    api_run_id: api ? api.run_id : null, failure_category: api ? '' : classified.failure_category,\n    evidence, text: api ? api.briefing.text : outage.notification_text,\n    subject: `UrbanEats ${api ? api.routing_status : 'DATA_FAILURE'}`,\n    channel_policy: {slack: !api || api.routing_status !== 'GREEN_SUMMARY', gmail: true},\n    slack_text: api ? api.briefing.channels?.slack_text ?? api.briefing.text : outage.notification_text,\n    gmail_text: api ? api.briefing.channels?.gmail_text ?? api.briefing.text : outage.notification_text};\n}\n\nfunction notificationAudit(packet, now, event, state, duplicate = false) {\n  return {orchestration_run_id: packet.orchestration_run_id, started_at: packet.started_at,\n    completed_at: now, api_service: 'urbaneats-api:8000', attempt_count: packet.attempt_count,\n    failure_category: packet.failure_category, routing_status: packet.routing_status,\n    test_mode: packet.test_mode, duplicate_suppression: duplicate,\n    slack_delivery_state: packet.routing_status === 'GREEN_SUMMARY' ? 'SKIPPED_POLICY' : state,\n    gmail_delivery_state: state, event_type: event,\n    // Retain Phase-3A columns; packet_json is stored inside evidence_json for schema compatibility.\n    evidence_json: JSON.stringify({packet, evidence: packet.evidence}), delivery_channel: '',\n    slack_attempts: 0, gmail_attempts: 0, retry_allowed: false, delivery_error_category: ''};\n}\n\nfunction prepareNotificationClaim(result, packet, now) {\n  const owns = typeof result?.id === 'string' && result.name === packet.claim_table_name;\n  const error = typeof result?.error === 'string' ? result.error : JSON.stringify(result?.error || {});\n  const duplicate = !owns && /already exists|unique constraint|duplicate/i.test(error);\n  if (!owns && !duplicate) throw Error('Persistent notification claim failed; delivery blocked');\n  return notificationAudit(packet, now, 'notification_prepared',\n    duplicate ? 'DUPLICATE_SUPPRESSED' : packet.test_mode ? 'SKIPPED_TEST_MODE' : 'PENDING', duplicate);\n}\n\nfunction notificationReceipt(initial, channel, receipt, attempt, now) {\n  const packet = JSON.parse(initial.evidence_json).packet;\n  const row = notificationAudit(packet, now, 'delivery_attempt', 'PENDING', initial.duplicate_suppression);\n  const policySkip = channel === 'slack' && packet.routing_status === 'GREEN_SUMMARY';\n  const skipped = policySkip || initial.duplicate_suppression || packet.test_mode;\n  const slackTimestamp = receipt?.message_timestamp ?? receipt?.message?.ts;\n  // A disabled node returns the upstream audit item unchanged, not a send receipt.\n  const passThrough = !skipped && receipt && typeof receipt === 'object'\n    && Object.keys(receipt).length === Object.keys(initial).length\n    && Object.keys(initial).every(key => JSON.stringify(receipt[key]) === JSON.stringify(initial[key]));\n  const ok = !passThrough && (channel === 'slack' ? receipt.ok === true\n    && typeof receipt.channel === 'string' && receipt.channel.trim().length > 0\n    && typeof slackTimestamp === 'string' && slackTimestamp.trim().length > 0\n    : typeof receipt.id === 'string' && !receipt.error);\n  const rate = channel === 'slack'\n    ? receipt.ok === false && ['ratelimited', 'rate_limited'].includes(receipt.error)\n    : receipt.statusCode === 429 || receipt.error?.statusCode === 429;\n  const state = policySkip ? 'SKIPPED_POLICY' : skipped ? initial[`${channel}_delivery_state`] : ok ? 'SUCCESS' : rate ? 'FAILURE' : 'UNKNOWN';\n  row[`${channel}_delivery_state`] = state;\n  row.delivery_channel = channel;\n  row[`${channel}_attempts`] = skipped || passThrough ? 0 : attempt;\n  row.retry_allowed = !skipped && !passThrough && rate && attempt < 3;\n  row.delivery_error_category = skipped || ok ? '' : passThrough ? 'CHANNEL_NOT_SENT' : rate ? 'RATE_LIMITED' : 'UNVERIFIED_RECEIPT';\n  row.event_type = skipped ? 'delivery_skipped' : passThrough ? 'delivery_not_sent' : 'delivery_attempt';\n  return row;\n}\n\nfunction completeNotification(initial, rows, now) {\n  const packet = JSON.parse(initial.evidence_json).packet;\n  const slack = rows.find(r => r.delivery_channel === 'slack');\n  const gmail = rows.find(r => r.delivery_channel === 'gmail');\n  if (!slack || !gmail || rows.length !== 2 || rows.some(r => r.retry_allowed\n      || r.orchestration_run_id !== packet.orchestration_run_id)) throw Error('Delivery audit mismatch');\n  const row = notificationAudit(packet, now, 'notification_complete', 'PENDING', initial.duplicate_suppression);\n  for (const channel of ['slack', 'gmail']) {\n    const result = channel === 'slack' ? slack : gmail;\n    row[`${channel}_delivery_state`] = result[`${channel}_delivery_state`];\n    row[`${channel}_attempts`] = result[`${channel}_attempts`];\n  }\n  if (['slack', 'gmail'].some(channel => row[`${channel}_delivery_state`] === 'UNKNOWN'))\n    row.event_type = 'notification_unverified';\n  else if (['slack', 'gmail'].some(channel => row[`${channel}_delivery_state`] === 'FAILURE'))\n    row.event_type = 'notification_failed';\n  return row;\n}\n\n\n\nconst prior=$runIndex ? $('Normalize Response').all(0,$runIndex-1)[0].json.attempt_history : [];\nreturn [{json:normalizeNotification($json,$('Settings').first().json,$execution,$runIndex+1,prior,new Date().toISOString())}];\n"
+      }
+    },
+    {
+      "id": "retry-api",
+      "name": "Retry API",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1300,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.retry_api }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "api-retry-delay",
+      "name": "API Retry Delay",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        240
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 1,
+        "unit": "seconds"
+      }
+    },
+    {
+      "id": "claim-run",
+      "name": "Claim Run",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        260,
+        240
+      ],
+      "parameters": {
+        "resource": "table",
+        "operation": "create",
+        "tableName": "={{ $json.claim_table_name }}",
+        "columns": {
+          "column": [
+            {
+              "name": "orchestration_run_id",
+              "type": "string"
+            },
+            {
+              "name": "started_at",
+              "type": "string"
+            },
+            {
+              "name": "completed_at",
+              "type": "string"
+            },
+            {
+              "name": "api_service",
+              "type": "string"
+            },
+            {
+              "name": "attempt_count",
+              "type": "number"
+            },
+            {
+              "name": "failure_category",
+              "type": "string"
+            },
+            {
+              "name": "routing_status",
+              "type": "string"
+            },
+            {
+              "name": "test_mode",
+              "type": "boolean"
+            },
+            {
+              "name": "duplicate_suppression",
+              "type": "boolean"
+            },
+            {
+              "name": "slack_delivery_state",
+              "type": "string"
+            },
+            {
+              "name": "gmail_delivery_state",
+              "type": "string"
+            },
+            {
+              "name": "event_type",
+              "type": "string"
+            },
+            {
+              "name": "evidence_json",
+              "type": "string"
+            },
+            {
+              "name": "delivery_channel",
+              "type": "string"
+            },
+            {
+              "name": "slack_attempts",
+              "type": "number"
+            },
+            {
+              "name": "gmail_attempts",
+              "type": "number"
+            },
+            {
+              "name": "retry_allowed",
+              "type": "boolean"
+            },
+            {
+              "name": "delivery_error_category",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {
+          "createIfNotExists": false
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "prepare-audit-and-gate",
+      "name": "Prepare Audit and Gate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        240
+      ],
+      "parameters": {
+        "jsCode": "// Pure orchestration logic, embedded verbatim in the exported n8n Code nodes.\n// It deliberately never copies model data or arbitrary error text into outage evidence.\nfunction classifyApiResponse(response) {\n  const status = Number(response?.statusCode || response?.status || 0);\n  const error = response?.error;\n  if (status >= 500) return {failure_category: 'HTTP_5XX', http_status: status};\n  if (error) {\n    const description = typeof error === 'string' ? error : JSON.stringify(error);\n    if (/ENOTFOUND|EAI_AGAIN|getaddrinfo|incorrect host|name resolution/i.test(description))\n      return {failure_category: 'DNS_SERVICE_FAILURE'};\n    if (/ECONNREFUSED|refused.*connection|connection.*refused/i.test(description))\n      return {failure_category: 'CONNECTION_REFUSED'};\n    if (/ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED|timed?\\s*out|timeout/i.test(description))\n      return {failure_category: 'TIMEOUT'};\n    return {failure_category: 'TRANSPORT_FAILURE'};\n  }\n  if (status && (status < 200 || status >= 300))\n    return {failure_category: 'HTTP_ERROR', http_status: status};\n  // n8n's text response uses `data` even when fullResponse is enabled.\n  let body = response?.body ?? response?.data ?? response;\n  if (typeof body === 'string') {\n    try { body = JSON.parse(body); } catch { return {failure_category: 'MALFORMED_RESPONSE'}; }\n  }\n  const valid = body && ['DATA_FAILURE', 'GREEN_SUMMARY', 'RED_ALERT'].includes(body.routing_status)\n    && /^UE-[0-9a-f]{32}$/.test(body.run_id || '')\n    && body.evidence?.routing_status === body.routing_status\n    && Array.isArray(body.evidence?.facts) && body.evidence.facts.length > 0\n    && typeof body.briefing?.text === 'string';\n  return valid ? {api_response: body} : {failure_category: 'MALFORMED_RESPONSE'};\n}\n\nfunction initializeOrchestration(settings, execution, now) {\n  const override = settings.orchestration_run_id_override || '';\n  const force = settings.force_retry_nonce || '';\n  if ((override && !/^[A-Za-z0-9_-]{1,48}$/.test(override))\n      || (force && !/^[A-Za-z0-9_-]{1,16}$/.test(force))) throw Error('Invalid orchestration identity');\n  const day = new Date(now).toLocaleDateString('en-CA', {timeZone: 'Asia/Kolkata'}).replaceAll('-', '');\n  const base = override || (execution.mode === 'trigger' ? `ORCH-${day}-0730` : `ORCH-${execution.id}`);\n  const id = force ? `${base}-F-${force}` : base;\n  if (!/^[A-Za-z0-9_-]{1,48}$/.test(id)) throw Error('Invalid orchestration identity');\n  return {orchestration_run_id: id, started_at: now, test_mode: settings.test_mode !== false,\n    source_batch_id: /^[A-Za-z0-9_-]{1,100}$/.test(settings.source_batch_id || '')\n      ? settings.source_batch_id : null, claim_table_name: `UE_ORCH_${id}`};\n}\n\nfunction constructOutage(context, failure, now) {\n  const packet = {schema_version: 'orchestration-failure-v1', evidence_origin: 'orchestration',\n    orchestration_run_id: context.orchestration_run_id, generated_at: now,\n    routing_status: 'DATA_FAILURE', failure_stage: 'URBANEATS_API',\n    failure_category: failure.failure_category, attempt_count: failure.attempt_count,\n    api_service: 'urbaneats-api:8000', source_batch_id: context.source_batch_id,\n    test_mode: context.test_mode, notification_required: true,\n    attempts: failure.attempt_history};\n  const text = ['UrbanEats automation failure - DATA_FAILURE.',\n    'The scoring service could not provide a usable response after bounded attempts.',\n    'No GREEN or RED operational assessment was produced. Manual system review is required.',\n    `Orchestration run: ${packet.orchestration_run_id}; timestamp: ${now};`,\n    `stage: ${packet.failure_stage}; category: ${packet.failure_category};`,\n    `attempts: ${packet.attempt_count}; retries: ${Math.max(0, packet.attempt_count - 1)};`,\n    `source batch: ${packet.source_batch_id ?? 'unavailable'}; evidence origin: orchestration.`].join('\\n');\n  return {orchestration_run_id: context.orchestration_run_id, started_at: context.started_at,\n    test_mode: context.test_mode, source_batch_id: context.source_batch_id,\n    claim_table_name: context.claim_table_name, evidence_origin: 'orchestration', routing_status: 'DATA_FAILURE',\n    outage_evidence: packet, notification_text: text};\n}\n\n\n// Shared portfolio orchestration. API business/model evidence is never recomputed.\nfunction identityHash(text) {\n  // SHA-256 keeps arbitrary source identities out of native table names.\n  const bytes = Array.from(unescape(encodeURIComponent(text)), c => c.charCodeAt(0));\n  const length = bytes.length * 8;\n  bytes.push(128);\n  while (bytes.length % 64 !== 56) bytes.push(0);\n  bytes.push(0, 0, 0, 0, (length >>> 24) & 255, (length >>> 16) & 255,\n    (length >>> 8) & 255, length & 255);\n  const primes = [], initial = [], constants = [];\n  for (let n = 2; primes.length < 64; n++) {\n    if (primes.some(p => n % p === 0)) continue;\n    primes.push(n);\n    if (initial.length < 8) initial.push((Math.sqrt(n) % 1 * 2 ** 32) | 0);\n    constants.push((Math.cbrt(n) % 1 * 2 ** 32) | 0);\n  }\n  const rotate = (n, b) => (n >>> b) | (n << (32 - b));\n  let hash = initial;\n  for (let offset = 0; offset < bytes.length; offset += 64) {\n    const w = [];\n    for (let i = 0; i < 64; i++) {\n      if (i < 16) {\n        const p = offset + i * 4;\n        w[i] = (bytes[p] << 24) | (bytes[p + 1] << 16) | (bytes[p + 2] << 8) | bytes[p + 3];\n      } else {\n        const x = w[i - 15], y = w[i - 2];\n        w[i] = (w[i - 16] + (rotate(x, 7) ^ rotate(x, 18) ^ (x >>> 3))\n          + w[i - 7] + (rotate(y, 17) ^ rotate(y, 19) ^ (y >>> 10))) | 0;\n      }\n    }\n    let [a, b, c, d, e, f, g, h] = hash;\n    for (let i = 0; i < 64; i++) {\n      const t1 = (h + (rotate(e, 6) ^ rotate(e, 11) ^ rotate(e, 25))\n        + ((e & f) ^ (~e & g)) + constants[i] + w[i]) | 0;\n      const t2 = ((rotate(a, 2) ^ rotate(a, 13) ^ rotate(a, 22))\n        + ((a & b) ^ (a & c) ^ (b & c))) | 0;\n      [a, b, c, d, e, f, g, h] = [(t1 + t2) | 0, a, b, c, (d + t1) | 0, e, f, g];\n    }\n    hash = hash.map((v, i) => (v + [a, b, c, d, e, f, g, h][i]) | 0);\n  }\n  return hash.map(v => (v >>> 0).toString(16).padStart(8, '0')).join('');\n}\n\nfunction normalizeNotification(response, settings, execution, attempt, previous, now) {\n  const context = initializeOrchestration(settings, execution, settings.started_at || now);\n  const classified = classifyApiResponse(response);\n  const attempts = [...previous, {attempt, at: now,\n    category: classified.failure_category || 'API_RESPONSE', http_status: classified.http_status || null}];\n  if (!classified.api_response && attempt < 3 && classified.failure_category !== 'HTTP_ERROR')\n    return {retry_api: true, attempt_count: attempt, attempt_history: attempts};\n  const api = classified.api_response;\n  const outage = api ? null : constructOutage(context,\n    {...classified, attempt_count: attempt, attempt_history: attempts}, now);\n  const evidence = api ? api.evidence : outage.outage_evidence;\n  const source = api ? api.source_batch_id || evidence.source_batch_id : context.source_batch_id;\n  const origin = api ? 'api' : 'orchestration';\n  // API batches deduplicate across different API run IDs; outages retain Phase-3A identities.\n  const identity = api ? `batch:${source || evidence.source_sha256 || api.run_id}`\n    : `outage:${context.orchestration_run_id}`;\n  const force = settings.force_retry_nonce || '';\n  const claim = api ? `UE_NOTIFY_${identityHash(identity + (force ? ':force:' + force : ''))}`\n    : context.claim_table_name; // preserves Phase-3A outage claims across upgrade\n  return {retry_api: false, attempt_count: attempt, attempt_history: attempts,\n    orchestration_run_id: context.orchestration_run_id, started_at: context.started_at,\n    test_mode: context.test_mode, source_batch_id: source || null, claim_table_name: claim,\n    evidence_origin: origin, routing_status: api ? api.routing_status : 'DATA_FAILURE',\n    api_run_id: api ? api.run_id : null, failure_category: api ? '' : classified.failure_category,\n    evidence, text: api ? api.briefing.text : outage.notification_text,\n    subject: `UrbanEats ${api ? api.routing_status : 'DATA_FAILURE'}`,\n    channel_policy: {slack: !api || api.routing_status !== 'GREEN_SUMMARY', gmail: true},\n    slack_text: api ? api.briefing.channels?.slack_text ?? api.briefing.text : outage.notification_text,\n    gmail_text: api ? api.briefing.channels?.gmail_text ?? api.briefing.text : outage.notification_text};\n}\n\nfunction notificationAudit(packet, now, event, state, duplicate = false) {\n  return {orchestration_run_id: packet.orchestration_run_id, started_at: packet.started_at,\n    completed_at: now, api_service: 'urbaneats-api:8000', attempt_count: packet.attempt_count,\n    failure_category: packet.failure_category, routing_status: packet.routing_status,\n    test_mode: packet.test_mode, duplicate_suppression: duplicate,\n    slack_delivery_state: packet.routing_status === 'GREEN_SUMMARY' ? 'SKIPPED_POLICY' : state,\n    gmail_delivery_state: state, event_type: event,\n    // Retain Phase-3A columns; packet_json is stored inside evidence_json for schema compatibility.\n    evidence_json: JSON.stringify({packet, evidence: packet.evidence}), delivery_channel: '',\n    slack_attempts: 0, gmail_attempts: 0, retry_allowed: false, delivery_error_category: ''};\n}\n\nfunction prepareNotificationClaim(result, packet, now) {\n  const owns = typeof result?.id === 'string' && result.name === packet.claim_table_name;\n  const error = typeof result?.error === 'string' ? result.error : JSON.stringify(result?.error || {});\n  const duplicate = !owns && /already exists|unique constraint|duplicate/i.test(error);\n  if (!owns && !duplicate) throw Error('Persistent notification claim failed; delivery blocked');\n  return notificationAudit(packet, now, 'notification_prepared',\n    duplicate ? 'DUPLICATE_SUPPRESSED' : packet.test_mode ? 'SKIPPED_TEST_MODE' : 'PENDING', duplicate);\n}\n\nfunction notificationReceipt(initial, channel, receipt, attempt, now) {\n  const packet = JSON.parse(initial.evidence_json).packet;\n  const row = notificationAudit(packet, now, 'delivery_attempt', 'PENDING', initial.duplicate_suppression);\n  const policySkip = channel === 'slack' && packet.routing_status === 'GREEN_SUMMARY';\n  const skipped = policySkip || initial.duplicate_suppression || packet.test_mode;\n  const slackTimestamp = receipt?.message_timestamp ?? receipt?.message?.ts;\n  // A disabled node returns the upstream audit item unchanged, not a send receipt.\n  const passThrough = !skipped && receipt && typeof receipt === 'object'\n    && Object.keys(receipt).length === Object.keys(initial).length\n    && Object.keys(initial).every(key => JSON.stringify(receipt[key]) === JSON.stringify(initial[key]));\n  const ok = !passThrough && (channel === 'slack' ? receipt.ok === true\n    && typeof receipt.channel === 'string' && receipt.channel.trim().length > 0\n    && typeof slackTimestamp === 'string' && slackTimestamp.trim().length > 0\n    : typeof receipt.id === 'string' && !receipt.error);\n  const rate = channel === 'slack'\n    ? receipt.ok === false && ['ratelimited', 'rate_limited'].includes(receipt.error)\n    : receipt.statusCode === 429 || receipt.error?.statusCode === 429;\n  const state = policySkip ? 'SKIPPED_POLICY' : skipped ? initial[`${channel}_delivery_state`] : ok ? 'SUCCESS' : rate ? 'FAILURE' : 'UNKNOWN';\n  row[`${channel}_delivery_state`] = state;\n  row.delivery_channel = channel;\n  row[`${channel}_attempts`] = skipped || passThrough ? 0 : attempt;\n  row.retry_allowed = !skipped && !passThrough && rate && attempt < 3;\n  row.delivery_error_category = skipped || ok ? '' : passThrough ? 'CHANNEL_NOT_SENT' : rate ? 'RATE_LIMITED' : 'UNVERIFIED_RECEIPT';\n  row.event_type = skipped ? 'delivery_skipped' : passThrough ? 'delivery_not_sent' : 'delivery_attempt';\n  return row;\n}\n\nfunction completeNotification(initial, rows, now) {\n  const packet = JSON.parse(initial.evidence_json).packet;\n  const slack = rows.find(r => r.delivery_channel === 'slack');\n  const gmail = rows.find(r => r.delivery_channel === 'gmail');\n  if (!slack || !gmail || rows.length !== 2 || rows.some(r => r.retry_allowed\n      || r.orchestration_run_id !== packet.orchestration_run_id)) throw Error('Delivery audit mismatch');\n  const row = notificationAudit(packet, now, 'notification_complete', 'PENDING', initial.duplicate_suppression);\n  for (const channel of ['slack', 'gmail']) {\n    const result = channel === 'slack' ? slack : gmail;\n    row[`${channel}_delivery_state`] = result[`${channel}_delivery_state`];\n    row[`${channel}_attempts`] = result[`${channel}_attempts`];\n  }\n  if (['slack', 'gmail'].some(channel => row[`${channel}_delivery_state`] === 'UNKNOWN'))\n    row.event_type = 'notification_unverified';\n  else if (['slack', 'gmail'].some(channel => row[`${channel}_delivery_state`] === 'FAILURE'))\n    row.event_type = 'notification_failed';\n  return row;\n}\n\n\nreturn [{json:prepareNotificationClaim($json,$('Normalize Response').last().json,new Date().toISOString())}];"
+      }
+    },
+    {
+      "id": "persist-prepared-audit",
+      "name": "Persist Prepared Audit",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        780,
+        240
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "={{ $('Normalize Response').last().json.claim_table_name }}"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "orchestration_run_id": "={{ $json.orchestration_run_id }}",
+            "started_at": "={{ $json.started_at }}",
+            "completed_at": "={{ $json.completed_at }}",
+            "api_service": "={{ $json.api_service }}",
+            "attempt_count": "={{ $json.attempt_count }}",
+            "failure_category": "={{ $json.failure_category }}",
+            "routing_status": "={{ $json.routing_status }}",
+            "test_mode": "={{ $json.test_mode }}",
+            "duplicate_suppression": "={{ $json.duplicate_suppression }}",
+            "slack_delivery_state": "={{ $json.slack_delivery_state }}",
+            "gmail_delivery_state": "={{ $json.gmail_delivery_state }}",
+            "event_type": "={{ $json.event_type }}",
+            "evidence_json": "={{ $json.evidence_json }}",
+            "delivery_channel": "={{ $json.delivery_channel }}",
+            "slack_attempts": "={{ $json.slack_attempts }}",
+            "gmail_attempts": "={{ $json.gmail_attempts }}",
+            "retry_allowed": "={{ $json.retry_allowed }}",
+            "delivery_error_category": "={{ $json.delivery_error_category }}"
+          },
+          "schema": [
+            {
+              "id": "orchestration_run_id",
+              "displayName": "orchestration_run_id",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "started_at",
+              "displayName": "started_at",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "completed_at",
+              "displayName": "completed_at",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "api_service",
+              "displayName": "api_service",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "attempt_count",
+              "displayName": "attempt_count",
+              "type": "number",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "failure_category",
+              "displayName": "failure_category",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "routing_status",
+              "displayName": "routing_status",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "test_mode",
+              "displayName": "test_mode",
+              "type": "boolean",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "duplicate_suppression",
+              "displayName": "duplicate_suppression",
+              "type": "boolean",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "slack_delivery_state",
+              "displayName": "slack_delivery_state",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "gmail_delivery_state",
+              "displayName": "gmail_delivery_state",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "event_type",
+              "displayName": "event_type",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "evidence_json",
+              "displayName": "evidence_json",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "delivery_channel",
+              "displayName": "delivery_channel",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "slack_attempts",
+              "displayName": "slack_attempts",
+              "type": "number",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "gmail_attempts",
+              "displayName": "gmail_attempts",
+              "type": "number",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "retry_allowed",
+              "displayName": "retry_allowed",
+              "type": "boolean",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "delivery_error_category",
+              "displayName": "delivery_error_category",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "duplicate-and-test_mode-gate",
+      "name": "Duplicate and TEST_MODE Gate",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1040,
+        240
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ !$json.duplicate_suppression && !$json.test_mode && $json.gmail_delivery_state === 'PENDING' }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "slack-required",
+      "name": "Slack Required",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1300,
+        240
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ JSON.parse($json.evidence_json).packet.channel_policy.slack }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "slack",
+      "name": "Slack",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        0,
+        480
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "CONFIGURE_LOCALLY"
+        },
+        "text": "={{ JSON.parse($json.evidence_json).packet.slack_text }}",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      },
+      "disabled": true,
+      "retryOnFail": false,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "gmail",
+      "name": "Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        260,
+        480
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "CONFIGURE_LOCALLY",
+        "subject": "={{ JSON.parse($json.evidence_json).packet.subject }}",
+        "emailType": "text",
+        "message": "={{ JSON.parse($json.evidence_json).packet.gmail_text }}",
+        "options": {}
+      },
+      "disabled": true,
+      "retryOnFail": false,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "parse-receipts",
+      "name": "Parse Receipts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        480
+      ],
+      "parameters": {
+        "jsCode": "// Pure orchestration logic, embedded verbatim in the exported n8n Code nodes.\n// It deliberately never copies model data or arbitrary error text into outage evidence.\nfunction classifyApiResponse(response) {\n  const status = Number(response?.statusCode || response?.status || 0);\n  const error = response?.error;\n  if (status >= 500) return {failure_category: 'HTTP_5XX', http_status: status};\n  if (error) {\n    const description = typeof error === 'string' ? error : JSON.stringify(error);\n    if (/ENOTFOUND|EAI_AGAIN|getaddrinfo|incorrect host|name resolution/i.test(description))\n      return {failure_category: 'DNS_SERVICE_FAILURE'};\n    if (/ECONNREFUSED|refused.*connection|connection.*refused/i.test(description))\n      return {failure_category: 'CONNECTION_REFUSED'};\n    if (/ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED|timed?\\s*out|timeout/i.test(description))\n      return {failure_category: 'TIMEOUT'};\n    return {failure_category: 'TRANSPORT_FAILURE'};\n  }\n  if (status && (status < 200 || status >= 300))\n    return {failure_category: 'HTTP_ERROR', http_status: status};\n  // n8n's text response uses `data` even when fullResponse is enabled.\n  let body = response?.body ?? response?.data ?? response;\n  if (typeof body === 'string') {\n    try { body = JSON.parse(body); } catch { return {failure_category: 'MALFORMED_RESPONSE'}; }\n  }\n  const valid = body && ['DATA_FAILURE', 'GREEN_SUMMARY', 'RED_ALERT'].includes(body.routing_status)\n    && /^UE-[0-9a-f]{32}$/.test(body.run_id || '')\n    && body.evidence?.routing_status === body.routing_status\n    && Array.isArray(body.evidence?.facts) && body.evidence.facts.length > 0\n    && typeof body.briefing?.text === 'string';\n  return valid ? {api_response: body} : {failure_category: 'MALFORMED_RESPONSE'};\n}\n\nfunction initializeOrchestration(settings, execution, now) {\n  const override = settings.orchestration_run_id_override || '';\n  const force = settings.force_retry_nonce || '';\n  if ((override && !/^[A-Za-z0-9_-]{1,48}$/.test(override))\n      || (force && !/^[A-Za-z0-9_-]{1,16}$/.test(force))) throw Error('Invalid orchestration identity');\n  const day = new Date(now).toLocaleDateString('en-CA', {timeZone: 'Asia/Kolkata'}).replaceAll('-', '');\n  const base = override || (execution.mode === 'trigger' ? `ORCH-${day}-0730` : `ORCH-${execution.id}`);\n  const id = force ? `${base}-F-${force}` : base;\n  if (!/^[A-Za-z0-9_-]{1,48}$/.test(id)) throw Error('Invalid orchestration identity');\n  return {orchestration_run_id: id, started_at: now, test_mode: settings.test_mode !== false,\n    source_batch_id: /^[A-Za-z0-9_-]{1,100}$/.test(settings.source_batch_id || '')\n      ? settings.source_batch_id : null, claim_table_name: `UE_ORCH_${id}`};\n}\n\nfunction constructOutage(context, failure, now) {\n  const packet = {schema_version: 'orchestration-failure-v1', evidence_origin: 'orchestration',\n    orchestration_run_id: context.orchestration_run_id, generated_at: now,\n    routing_status: 'DATA_FAILURE', failure_stage: 'URBANEATS_API',\n    failure_category: failure.failure_category, attempt_count: failure.attempt_count,\n    api_service: 'urbaneats-api:8000', source_batch_id: context.source_batch_id,\n    test_mode: context.test_mode, notification_required: true,\n    attempts: failure.attempt_history};\n  const text = ['UrbanEats automation failure - DATA_FAILURE.',\n    'The scoring service could not provide a usable response after bounded attempts.',\n    'No GREEN or RED operational assessment was produced. Manual system review is required.',\n    `Orchestration run: ${packet.orchestration_run_id}; timestamp: ${now};`,\n    `stage: ${packet.failure_stage}; category: ${packet.failure_category};`,\n    `attempts: ${packet.attempt_count}; retries: ${Math.max(0, packet.attempt_count - 1)};`,\n    `source batch: ${packet.source_batch_id ?? 'unavailable'}; evidence origin: orchestration.`].join('\\n');\n  return {orchestration_run_id: context.orchestration_run_id, started_at: context.started_at,\n    test_mode: context.test_mode, source_batch_id: context.source_batch_id,\n    claim_table_name: context.claim_table_name, evidence_origin: 'orchestration', routing_status: 'DATA_FAILURE',\n    outage_evidence: packet, notification_text: text};\n}\n\n\n// Shared portfolio orchestration. API business/model evidence is never recomputed.\nfunction identityHash(text) {\n  // SHA-256 keeps arbitrary source identities out of native table names.\n  const bytes = Array.from(unescape(encodeURIComponent(text)), c => c.charCodeAt(0));\n  const length = bytes.length * 8;\n  bytes.push(128);\n  while (bytes.length % 64 !== 56) bytes.push(0);\n  bytes.push(0, 0, 0, 0, (length >>> 24) & 255, (length >>> 16) & 255,\n    (length >>> 8) & 255, length & 255);\n  const primes = [], initial = [], constants = [];\n  for (let n = 2; primes.length < 64; n++) {\n    if (primes.some(p => n % p === 0)) continue;\n    primes.push(n);\n    if (initial.length < 8) initial.push((Math.sqrt(n) % 1 * 2 ** 32) | 0);\n    constants.push((Math.cbrt(n) % 1 * 2 ** 32) | 0);\n  }\n  const rotate = (n, b) => (n >>> b) | (n << (32 - b));\n  let hash = initial;\n  for (let offset = 0; offset < bytes.length; offset += 64) {\n    const w = [];\n    for (let i = 0; i < 64; i++) {\n      if (i < 16) {\n        const p = offset + i * 4;\n        w[i] = (bytes[p] << 24) | (bytes[p + 1] << 16) | (bytes[p + 2] << 8) | bytes[p + 3];\n      } else {\n        const x = w[i - 15], y = w[i - 2];\n        w[i] = (w[i - 16] + (rotate(x, 7) ^ rotate(x, 18) ^ (x >>> 3))\n          + w[i - 7] + (rotate(y, 17) ^ rotate(y, 19) ^ (y >>> 10))) | 0;\n      }\n    }\n    let [a, b, c, d, e, f, g, h] = hash;\n    for (let i = 0; i < 64; i++) {\n      const t1 = (h + (rotate(e, 6) ^ rotate(e, 11) ^ rotate(e, 25))\n        + ((e & f) ^ (~e & g)) + constants[i] + w[i]) | 0;\n      const t2 = ((rotate(a, 2) ^ rotate(a, 13) ^ rotate(a, 22))\n        + ((a & b) ^ (a & c) ^ (b & c))) | 0;\n      [a, b, c, d, e, f, g, h] = [(t1 + t2) | 0, a, b, c, (d + t1) | 0, e, f, g];\n    }\n    hash = hash.map((v, i) => (v + [a, b, c, d, e, f, g, h][i]) | 0);\n  }\n  return hash.map(v => (v >>> 0).toString(16).padStart(8, '0')).join('');\n}\n\nfunction normalizeNotification(response, settings, execution, attempt, previous, now) {\n  const context = initializeOrchestration(settings, execution, settings.started_at || now);\n  const classified = classifyApiResponse(response);\n  const attempts = [...previous, {attempt, at: now,\n    category: classified.failure_category || 'API_RESPONSE', http_status: classified.http_status || null}];\n  if (!classified.api_response && attempt < 3 && classified.failure_category !== 'HTTP_ERROR')\n    return {retry_api: true, attempt_count: attempt, attempt_history: attempts};\n  const api = classified.api_response;\n  const outage = api ? null : constructOutage(context,\n    {...classified, attempt_count: attempt, attempt_history: attempts}, now);\n  const evidence = api ? api.evidence : outage.outage_evidence;\n  const source = api ? api.source_batch_id || evidence.source_batch_id : context.source_batch_id;\n  const origin = api ? 'api' : 'orchestration';\n  // API batches deduplicate across different API run IDs; outages retain Phase-3A identities.\n  const identity = api ? `batch:${source || evidence.source_sha256 || api.run_id}`\n    : `outage:${context.orchestration_run_id}`;\n  const force = settings.force_retry_nonce || '';\n  const claim = api ? `UE_NOTIFY_${identityHash(identity + (force ? ':force:' + force : ''))}`\n    : context.claim_table_name; // preserves Phase-3A outage claims across upgrade\n  return {retry_api: false, attempt_count: attempt, attempt_history: attempts,\n    orchestration_run_id: context.orchestration_run_id, started_at: context.started_at,\n    test_mode: context.test_mode, source_batch_id: source || null, claim_table_name: claim,\n    evidence_origin: origin, routing_status: api ? api.routing_status : 'DATA_FAILURE',\n    api_run_id: api ? api.run_id : null, failure_category: api ? '' : classified.failure_category,\n    evidence, text: api ? api.briefing.text : outage.notification_text,\n    subject: `UrbanEats ${api ? api.routing_status : 'DATA_FAILURE'}`,\n    channel_policy: {slack: !api || api.routing_status !== 'GREEN_SUMMARY', gmail: true},\n    slack_text: api ? api.briefing.channels?.slack_text ?? api.briefing.text : outage.notification_text,\n    gmail_text: api ? api.briefing.channels?.gmail_text ?? api.briefing.text : outage.notification_text};\n}\n\nfunction notificationAudit(packet, now, event, state, duplicate = false) {\n  return {orchestration_run_id: packet.orchestration_run_id, started_at: packet.started_at,\n    completed_at: now, api_service: 'urbaneats-api:8000', attempt_count: packet.attempt_count,\n    failure_category: packet.failure_category, routing_status: packet.routing_status,\n    test_mode: packet.test_mode, duplicate_suppression: duplicate,\n    slack_delivery_state: packet.routing_status === 'GREEN_SUMMARY' ? 'SKIPPED_POLICY' : state,\n    gmail_delivery_state: state, event_type: event,\n    // Retain Phase-3A columns; packet_json is stored inside evidence_json for schema compatibility.\n    evidence_json: JSON.stringify({packet, evidence: packet.evidence}), delivery_channel: '',\n    slack_attempts: 0, gmail_attempts: 0, retry_allowed: false, delivery_error_category: ''};\n}\n\nfunction prepareNotificationClaim(result, packet, now) {\n  const owns = typeof result?.id === 'string' && result.name === packet.claim_table_name;\n  const error = typeof result?.error === 'string' ? result.error : JSON.stringify(result?.error || {});\n  const duplicate = !owns && /already exists|unique constraint|duplicate/i.test(error);\n  if (!owns && !duplicate) throw Error('Persistent notification claim failed; delivery blocked');\n  return notificationAudit(packet, now, 'notification_prepared',\n    duplicate ? 'DUPLICATE_SUPPRESSED' : packet.test_mode ? 'SKIPPED_TEST_MODE' : 'PENDING', duplicate);\n}\n\nfunction notificationReceipt(initial, channel, receipt, attempt, now) {\n  const packet = JSON.parse(initial.evidence_json).packet;\n  const row = notificationAudit(packet, now, 'delivery_attempt', 'PENDING', initial.duplicate_suppression);\n  const policySkip = channel === 'slack' && packet.routing_status === 'GREEN_SUMMARY';\n  const skipped = policySkip || initial.duplicate_suppression || packet.test_mode;\n  const slackTimestamp = receipt?.message_timestamp ?? receipt?.message?.ts;\n  // A disabled node returns the upstream audit item unchanged, not a send receipt.\n  const passThrough = !skipped && receipt && typeof receipt === 'object'\n    && Object.keys(receipt).length === Object.keys(initial).length\n    && Object.keys(initial).every(key => JSON.stringify(receipt[key]) === JSON.stringify(initial[key]));\n  const ok = !passThrough && (channel === 'slack' ? receipt.ok === true\n    && typeof receipt.channel === 'string' && receipt.channel.trim().length > 0\n    && typeof slackTimestamp === 'string' && slackTimestamp.trim().length > 0\n    : typeof receipt.id === 'string' && !receipt.error);\n  const rate = channel === 'slack'\n    ? receipt.ok === false && ['ratelimited', 'rate_limited'].includes(receipt.error)\n    : receipt.statusCode === 429 || receipt.error?.statusCode === 429;\n  const state = policySkip ? 'SKIPPED_POLICY' : skipped ? initial[`${channel}_delivery_state`] : ok ? 'SUCCESS' : rate ? 'FAILURE' : 'UNKNOWN';\n  row[`${channel}_delivery_state`] = state;\n  row.delivery_channel = channel;\n  row[`${channel}_attempts`] = skipped || passThrough ? 0 : attempt;\n  row.retry_allowed = !skipped && !passThrough && rate && attempt < 3;\n  row.delivery_error_category = skipped || ok ? '' : passThrough ? 'CHANNEL_NOT_SENT' : rate ? 'RATE_LIMITED' : 'UNVERIFIED_RECEIPT';\n  row.event_type = skipped ? 'delivery_skipped' : passThrough ? 'delivery_not_sent' : 'delivery_attempt';\n  return row;\n}\n\nfunction completeNotification(initial, rows, now) {\n  const packet = JSON.parse(initial.evidence_json).packet;\n  const slack = rows.find(r => r.delivery_channel === 'slack');\n  const gmail = rows.find(r => r.delivery_channel === 'gmail');\n  if (!slack || !gmail || rows.length !== 2 || rows.some(r => r.retry_allowed\n      || r.orchestration_run_id !== packet.orchestration_run_id)) throw Error('Delivery audit mismatch');\n  const row = notificationAudit(packet, now, 'notification_complete', 'PENDING', initial.duplicate_suppression);\n  for (const channel of ['slack', 'gmail']) {\n    const result = channel === 'slack' ? slack : gmail;\n    row[`${channel}_delivery_state`] = result[`${channel}_delivery_state`];\n    row[`${channel}_attempts`] = result[`${channel}_attempts`];\n  }\n  if (['slack', 'gmail'].some(channel => row[`${channel}_delivery_state`] === 'UNKNOWN'))\n    row.event_type = 'notification_unverified';\n  else if (['slack', 'gmail'].some(channel => row[`${channel}_delivery_state`] === 'FAILURE'))\n    row.event_type = 'notification_failed';\n  return row;\n}\n\n\n\nconst initial=$('Persist Prepared Audit').first().json;\nif($prevNode.name==='Slack Required')\n return [{json:notificationReceipt(initial,'slack',{},0,new Date().toISOString())}];\nif($prevNode.name==='Duplicate and TEST_MODE Gate')\n return ['slack','gmail'].map(channel=>({json:notificationReceipt(initial,channel,{},0,new Date().toISOString())}));\nconst channel=$prevNode.name==='Slack' ? 'slack' : $prevNode.name==='Gmail' ? 'gmail' : null;\nif(!channel) throw Error('Unexpected delivery source');\n// The parser is shared; its runIndex is not either channel's attempt count.\nlet count=0;\nfor(let index=0;index<3;index++) {\n try { if($(channel==='slack' ? 'Slack' : 'Gmail').all(0,index).length) count=index+1; }\n catch { break; }\n}\nif(!count) throw Error('Missing delivery attempt');\nreturn [{json:notificationReceipt(initial,channel,$json,count,new Date().toISOString())}];\n"
+      }
+    },
+    {
+      "id": "persist-delivery-audit",
+      "name": "Persist Delivery Audit",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        780,
+        480
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "={{ $('Normalize Response').last().json.claim_table_name }}"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "orchestration_run_id": "={{ $json.orchestration_run_id }}",
+            "started_at": "={{ $json.started_at }}",
+            "completed_at": "={{ $json.completed_at }}",
+            "api_service": "={{ $json.api_service }}",
+            "attempt_count": "={{ $json.attempt_count }}",
+            "failure_category": "={{ $json.failure_category }}",
+            "routing_status": "={{ $json.routing_status }}",
+            "test_mode": "={{ $json.test_mode }}",
+            "duplicate_suppression": "={{ $json.duplicate_suppression }}",
+            "slack_delivery_state": "={{ $json.slack_delivery_state }}",
+            "gmail_delivery_state": "={{ $json.gmail_delivery_state }}",
+            "event_type": "={{ $json.event_type }}",
+            "evidence_json": "={{ $json.evidence_json }}",
+            "delivery_channel": "={{ $json.delivery_channel }}",
+            "slack_attempts": "={{ $json.slack_attempts }}",
+            "gmail_attempts": "={{ $json.gmail_attempts }}",
+            "retry_allowed": "={{ $json.retry_allowed }}",
+            "delivery_error_category": "={{ $json.delivery_error_category }}"
+          },
+          "schema": [
+            {
+              "id": "orchestration_run_id",
+              "displayName": "orchestration_run_id",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "started_at",
+              "displayName": "started_at",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "completed_at",
+              "displayName": "completed_at",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "api_service",
+              "displayName": "api_service",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "attempt_count",
+              "displayName": "attempt_count",
+              "type": "number",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "failure_category",
+              "displayName": "failure_category",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "routing_status",
+              "displayName": "routing_status",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "test_mode",
+              "displayName": "test_mode",
+              "type": "boolean",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "duplicate_suppression",
+              "displayName": "duplicate_suppression",
+              "type": "boolean",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "slack_delivery_state",
+              "displayName": "slack_delivery_state",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "gmail_delivery_state",
+              "displayName": "gmail_delivery_state",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "event_type",
+              "displayName": "event_type",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "evidence_json",
+              "displayName": "evidence_json",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "delivery_channel",
+              "displayName": "delivery_channel",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "slack_attempts",
+              "displayName": "slack_attempts",
+              "type": "number",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "gmail_attempts",
+              "displayName": "gmail_attempts",
+              "type": "number",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "retry_allowed",
+              "displayName": "retry_allowed",
+              "type": "boolean",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "delivery_error_category",
+              "displayName": "delivery_error_category",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "retry-delivery",
+      "name": "Retry Delivery",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1040,
+        480
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.retry_allowed }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "delivery-retry-delay",
+      "name": "Delivery Retry Delay",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1300,
+        480
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 2,
+        "unit": "seconds"
+      }
+    },
+    {
+      "id": "retry-channel",
+      "name": "Retry Channel",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        0,
+        720
+      ],
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 2,
+        "output": "={{ $json.delivery_channel === 'slack' ? 0 : 1 }}"
+      }
+    },
+    {
+      "id": "completed-channel",
+      "name": "Completed Channel",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        260,
+        720
+      ],
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 2,
+        "output": "={{ $json.delivery_channel === 'slack' ? 0 : 1 }}"
+      }
+    },
+    {
+      "id": "merge-channel-results",
+      "name": "Merge Channel Results",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        520,
+        720
+      ],
+      "parameters": {
+        "mode": "append",
+        "numberInputs": 2
+      }
+    },
+    {
+      "id": "complete-audit",
+      "name": "Complete Audit",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        780,
+        720
+      ],
+      "parameters": {
+        "jsCode": "// Pure orchestration logic, embedded verbatim in the exported n8n Code nodes.\n// It deliberately never copies model data or arbitrary error text into outage evidence.\nfunction classifyApiResponse(response) {\n  const status = Number(response?.statusCode || response?.status || 0);\n  const error = response?.error;\n  if (status >= 500) return {failure_category: 'HTTP_5XX', http_status: status};\n  if (error) {\n    const description = typeof error === 'string' ? error : JSON.stringify(error);\n    if (/ENOTFOUND|EAI_AGAIN|getaddrinfo|incorrect host|name resolution/i.test(description))\n      return {failure_category: 'DNS_SERVICE_FAILURE'};\n    if (/ECONNREFUSED|refused.*connection|connection.*refused/i.test(description))\n      return {failure_category: 'CONNECTION_REFUSED'};\n    if (/ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED|timed?\\s*out|timeout/i.test(description))\n      return {failure_category: 'TIMEOUT'};\n    return {failure_category: 'TRANSPORT_FAILURE'};\n  }\n  if (status && (status < 200 || status >= 300))\n    return {failure_category: 'HTTP_ERROR', http_status: status};\n  // n8n's text response uses `data` even when fullResponse is enabled.\n  let body = response?.body ?? response?.data ?? response;\n  if (typeof body === 'string') {\n    try { body = JSON.parse(body); } catch { return {failure_category: 'MALFORMED_RESPONSE'}; }\n  }\n  const valid = body && ['DATA_FAILURE', 'GREEN_SUMMARY', 'RED_ALERT'].includes(body.routing_status)\n    && /^UE-[0-9a-f]{32}$/.test(body.run_id || '')\n    && body.evidence?.routing_status === body.routing_status\n    && Array.isArray(body.evidence?.facts) && body.evidence.facts.length > 0\n    && typeof body.briefing?.text === 'string';\n  return valid ? {api_response: body} : {failure_category: 'MALFORMED_RESPONSE'};\n}\n\nfunction initializeOrchestration(settings, execution, now) {\n  const override = settings.orchestration_run_id_override || '';\n  const force = settings.force_retry_nonce || '';\n  if ((override && !/^[A-Za-z0-9_-]{1,48}$/.test(override))\n      || (force && !/^[A-Za-z0-9_-]{1,16}$/.test(force))) throw Error('Invalid orchestration identity');\n  const day = new Date(now).toLocaleDateString('en-CA', {timeZone: 'Asia/Kolkata'}).replaceAll('-', '');\n  const base = override || (execution.mode === 'trigger' ? `ORCH-${day}-0730` : `ORCH-${execution.id}`);\n  const id = force ? `${base}-F-${force}` : base;\n  if (!/^[A-Za-z0-9_-]{1,48}$/.test(id)) throw Error('Invalid orchestration identity');\n  return {orchestration_run_id: id, started_at: now, test_mode: settings.test_mode !== false,\n    source_batch_id: /^[A-Za-z0-9_-]{1,100}$/.test(settings.source_batch_id || '')\n      ? settings.source_batch_id : null, claim_table_name: `UE_ORCH_${id}`};\n}\n\nfunction constructOutage(context, failure, now) {\n  const packet = {schema_version: 'orchestration-failure-v1', evidence_origin: 'orchestration',\n    orchestration_run_id: context.orchestration_run_id, generated_at: now,\n    routing_status: 'DATA_FAILURE', failure_stage: 'URBANEATS_API',\n    failure_category: failure.failure_category, attempt_count: failure.attempt_count,\n    api_service: 'urbaneats-api:8000', source_batch_id: context.source_batch_id,\n    test_mode: context.test_mode, notification_required: true,\n    attempts: failure.attempt_history};\n  const text = ['UrbanEats automation failure - DATA_FAILURE.',\n    'The scoring service could not provide a usable response after bounded attempts.',\n    'No GREEN or RED operational assessment was produced. Manual system review is required.',\n    `Orchestration run: ${packet.orchestration_run_id}; timestamp: ${now};`,\n    `stage: ${packet.failure_stage}; category: ${packet.failure_category};`,\n    `attempts: ${packet.attempt_count}; retries: ${Math.max(0, packet.attempt_count - 1)};`,\n    `source batch: ${packet.source_batch_id ?? 'unavailable'}; evidence origin: orchestration.`].join('\\n');\n  return {orchestration_run_id: context.orchestration_run_id, started_at: context.started_at,\n    test_mode: context.test_mode, source_batch_id: context.source_batch_id,\n    claim_table_name: context.claim_table_name, evidence_origin: 'orchestration', routing_status: 'DATA_FAILURE',\n    outage_evidence: packet, notification_text: text};\n}\n\n\n// Shared portfolio orchestration. API business/model evidence is never recomputed.\nfunction identityHash(text) {\n  // SHA-256 keeps arbitrary source identities out of native table names.\n  const bytes = Array.from(unescape(encodeURIComponent(text)), c => c.charCodeAt(0));\n  const length = bytes.length * 8;\n  bytes.push(128);\n  while (bytes.length % 64 !== 56) bytes.push(0);\n  bytes.push(0, 0, 0, 0, (length >>> 24) & 255, (length >>> 16) & 255,\n    (length >>> 8) & 255, length & 255);\n  const primes = [], initial = [], constants = [];\n  for (let n = 2; primes.length < 64; n++) {\n    if (primes.some(p => n % p === 0)) continue;\n    primes.push(n);\n    if (initial.length < 8) initial.push((Math.sqrt(n) % 1 * 2 ** 32) | 0);\n    constants.push((Math.cbrt(n) % 1 * 2 ** 32) | 0);\n  }\n  const rotate = (n, b) => (n >>> b) | (n << (32 - b));\n  let hash = initial;\n  for (let offset = 0; offset < bytes.length; offset += 64) {\n    const w = [];\n    for (let i = 0; i < 64; i++) {\n      if (i < 16) {\n        const p = offset + i * 4;\n        w[i] = (bytes[p] << 24) | (bytes[p + 1] << 16) | (bytes[p + 2] << 8) | bytes[p + 3];\n      } else {\n        const x = w[i - 15], y = w[i - 2];\n        w[i] = (w[i - 16] + (rotate(x, 7) ^ rotate(x, 18) ^ (x >>> 3))\n          + w[i - 7] + (rotate(y, 17) ^ rotate(y, 19) ^ (y >>> 10))) | 0;\n      }\n    }\n    let [a, b, c, d, e, f, g, h] = hash;\n    for (let i = 0; i < 64; i++) {\n      const t1 = (h + (rotate(e, 6) ^ rotate(e, 11) ^ rotate(e, 25))\n        + ((e & f) ^ (~e & g)) + constants[i] + w[i]) | 0;\n      const t2 = ((rotate(a, 2) ^ rotate(a, 13) ^ rotate(a, 22))\n        + ((a & b) ^ (a & c) ^ (b & c))) | 0;\n      [a, b, c, d, e, f, g, h] = [(t1 + t2) | 0, a, b, c, (d + t1) | 0, e, f, g];\n    }\n    hash = hash.map((v, i) => (v + [a, b, c, d, e, f, g, h][i]) | 0);\n  }\n  return hash.map(v => (v >>> 0).toString(16).padStart(8, '0')).join('');\n}\n\nfunction normalizeNotification(response, settings, execution, attempt, previous, now) {\n  const context = initializeOrchestration(settings, execution, settings.started_at || now);\n  const classified = classifyApiResponse(response);\n  const attempts = [...previous, {attempt, at: now,\n    category: classified.failure_category || 'API_RESPONSE', http_status: classified.http_status || null}];\n  if (!classified.api_response && attempt < 3 && classified.failure_category !== 'HTTP_ERROR')\n    return {retry_api: true, attempt_count: attempt, attempt_history: attempts};\n  const api = classified.api_response;\n  const outage = api ? null : constructOutage(context,\n    {...classified, attempt_count: attempt, attempt_history: attempts}, now);\n  const evidence = api ? api.evidence : outage.outage_evidence;\n  const source = api ? api.source_batch_id || evidence.source_batch_id : context.source_batch_id;\n  const origin = api ? 'api' : 'orchestration';\n  // API batches deduplicate across different API run IDs; outages retain Phase-3A identities.\n  const identity = api ? `batch:${source || evidence.source_sha256 || api.run_id}`\n    : `outage:${context.orchestration_run_id}`;\n  const force = settings.force_retry_nonce || '';\n  const claim = api ? `UE_NOTIFY_${identityHash(identity + (force ? ':force:' + force : ''))}`\n    : context.claim_table_name; // preserves Phase-3A outage claims across upgrade\n  return {retry_api: false, attempt_count: attempt, attempt_history: attempts,\n    orchestration_run_id: context.orchestration_run_id, started_at: context.started_at,\n    test_mode: context.test_mode, source_batch_id: source || null, claim_table_name: claim,\n    evidence_origin: origin, routing_status: api ? api.routing_status : 'DATA_FAILURE',\n    api_run_id: api ? api.run_id : null, failure_category: api ? '' : classified.failure_category,\n    evidence, text: api ? api.briefing.text : outage.notification_text,\n    subject: `UrbanEats ${api ? api.routing_status : 'DATA_FAILURE'}`,\n    channel_policy: {slack: !api || api.routing_status !== 'GREEN_SUMMARY', gmail: true},\n    slack_text: api ? api.briefing.channels?.slack_text ?? api.briefing.text : outage.notification_text,\n    gmail_text: api ? api.briefing.channels?.gmail_text ?? api.briefing.text : outage.notification_text};\n}\n\nfunction notificationAudit(packet, now, event, state, duplicate = false) {\n  return {orchestration_run_id: packet.orchestration_run_id, started_at: packet.started_at,\n    completed_at: now, api_service: 'urbaneats-api:8000', attempt_count: packet.attempt_count,\n    failure_category: packet.failure_category, routing_status: packet.routing_status,\n    test_mode: packet.test_mode, duplicate_suppression: duplicate,\n    slack_delivery_state: packet.routing_status === 'GREEN_SUMMARY' ? 'SKIPPED_POLICY' : state,\n    gmail_delivery_state: state, event_type: event,\n    // Retain Phase-3A columns; packet_json is stored inside evidence_json for schema compatibility.\n    evidence_json: JSON.stringify({packet, evidence: packet.evidence}), delivery_channel: '',\n    slack_attempts: 0, gmail_attempts: 0, retry_allowed: false, delivery_error_category: ''};\n}\n\nfunction prepareNotificationClaim(result, packet, now) {\n  const owns = typeof result?.id === 'string' && result.name === packet.claim_table_name;\n  const error = typeof result?.error === 'string' ? result.error : JSON.stringify(result?.error || {});\n  const duplicate = !owns && /already exists|unique constraint|duplicate/i.test(error);\n  if (!owns && !duplicate) throw Error('Persistent notification claim failed; delivery blocked');\n  return notificationAudit(packet, now, 'notification_prepared',\n    duplicate ? 'DUPLICATE_SUPPRESSED' : packet.test_mode ? 'SKIPPED_TEST_MODE' : 'PENDING', duplicate);\n}\n\nfunction notificationReceipt(initial, channel, receipt, attempt, now) {\n  const packet = JSON.parse(initial.evidence_json).packet;\n  const row = notificationAudit(packet, now, 'delivery_attempt', 'PENDING', initial.duplicate_suppression);\n  const policySkip = channel === 'slack' && packet.routing_status === 'GREEN_SUMMARY';\n  const skipped = policySkip || initial.duplicate_suppression || packet.test_mode;\n  const slackTimestamp = receipt?.message_timestamp ?? receipt?.message?.ts;\n  // A disabled node returns the upstream audit item unchanged, not a send receipt.\n  const passThrough = !skipped && receipt && typeof receipt === 'object'\n    && Object.keys(receipt).length === Object.keys(initial).length\n    && Object.keys(initial).every(key => JSON.stringify(receipt[key]) === JSON.stringify(initial[key]));\n  const ok = !passThrough && (channel === 'slack' ? receipt.ok === true\n    && typeof receipt.channel === 'string' && receipt.channel.trim().length > 0\n    && typeof slackTimestamp === 'string' && slackTimestamp.trim().length > 0\n    : typeof receipt.id === 'string' && !receipt.error);\n  const rate = channel === 'slack'\n    ? receipt.ok === false && ['ratelimited', 'rate_limited'].includes(receipt.error)\n    : receipt.statusCode === 429 || receipt.error?.statusCode === 429;\n  const state = policySkip ? 'SKIPPED_POLICY' : skipped ? initial[`${channel}_delivery_state`] : ok ? 'SUCCESS' : rate ? 'FAILURE' : 'UNKNOWN';\n  row[`${channel}_delivery_state`] = state;\n  row.delivery_channel = channel;\n  row[`${channel}_attempts`] = skipped || passThrough ? 0 : attempt;\n  row.retry_allowed = !skipped && !passThrough && rate && attempt < 3;\n  row.delivery_error_category = skipped || ok ? '' : passThrough ? 'CHANNEL_NOT_SENT' : rate ? 'RATE_LIMITED' : 'UNVERIFIED_RECEIPT';\n  row.event_type = skipped ? 'delivery_skipped' : passThrough ? 'delivery_not_sent' : 'delivery_attempt';\n  return row;\n}\n\nfunction completeNotification(initial, rows, now) {\n  const packet = JSON.parse(initial.evidence_json).packet;\n  const slack = rows.find(r => r.delivery_channel === 'slack');\n  const gmail = rows.find(r => r.delivery_channel === 'gmail');\n  if (!slack || !gmail || rows.length !== 2 || rows.some(r => r.retry_allowed\n      || r.orchestration_run_id !== packet.orchestration_run_id)) throw Error('Delivery audit mismatch');\n  const row = notificationAudit(packet, now, 'notification_complete', 'PENDING', initial.duplicate_suppression);\n  for (const channel of ['slack', 'gmail']) {\n    const result = channel === 'slack' ? slack : gmail;\n    row[`${channel}_delivery_state`] = result[`${channel}_delivery_state`];\n    row[`${channel}_attempts`] = result[`${channel}_attempts`];\n  }\n  if (['slack', 'gmail'].some(channel => row[`${channel}_delivery_state`] === 'UNKNOWN'))\n    row.event_type = 'notification_unverified';\n  else if (['slack', 'gmail'].some(channel => row[`${channel}_delivery_state`] === 'FAILURE'))\n    row.event_type = 'notification_failed';\n  return row;\n}\n\n\nreturn [{json:completeNotification($('Persist Prepared Audit').first().json,$input.all().map(i=>i.json),new Date().toISOString())}];"
+      }
+    },
+    {
+      "id": "persist-completed-audit",
+      "name": "Persist Completed Audit",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1040,
+        720
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "={{ $('Normalize Response').last().json.claim_table_name }}"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "orchestration_run_id": "={{ $json.orchestration_run_id }}",
+            "started_at": "={{ $json.started_at }}",
+            "completed_at": "={{ $json.completed_at }}",
+            "api_service": "={{ $json.api_service }}",
+            "attempt_count": "={{ $json.attempt_count }}",
+            "failure_category": "={{ $json.failure_category }}",
+            "routing_status": "={{ $json.routing_status }}",
+            "test_mode": "={{ $json.test_mode }}",
+            "duplicate_suppression": "={{ $json.duplicate_suppression }}",
+            "slack_delivery_state": "={{ $json.slack_delivery_state }}",
+            "gmail_delivery_state": "={{ $json.gmail_delivery_state }}",
+            "event_type": "={{ $json.event_type }}",
+            "evidence_json": "={{ $json.evidence_json }}",
+            "delivery_channel": "={{ $json.delivery_channel }}",
+            "slack_attempts": "={{ $json.slack_attempts }}",
+            "gmail_attempts": "={{ $json.gmail_attempts }}",
+            "retry_allowed": "={{ $json.retry_allowed }}",
+            "delivery_error_category": "={{ $json.delivery_error_category }}"
+          },
+          "schema": [
+            {
+              "id": "orchestration_run_id",
+              "displayName": "orchestration_run_id",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "started_at",
+              "displayName": "started_at",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "completed_at",
+              "displayName": "completed_at",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "api_service",
+              "displayName": "api_service",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "attempt_count",
+              "displayName": "attempt_count",
+              "type": "number",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "failure_category",
+              "displayName": "failure_category",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "routing_status",
+              "displayName": "routing_status",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "test_mode",
+              "displayName": "test_mode",
+              "type": "boolean",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "duplicate_suppression",
+              "displayName": "duplicate_suppression",
+              "type": "boolean",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "slack_delivery_state",
+              "displayName": "slack_delivery_state",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "gmail_delivery_state",
+              "displayName": "gmail_delivery_state",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "event_type",
+              "displayName": "event_type",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "evidence_json",
+              "displayName": "evidence_json",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "delivery_channel",
+              "displayName": "delivery_channel",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "slack_attempts",
+              "displayName": "slack_attempts",
+              "type": "number",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "gmail_attempts",
+              "displayName": "gmail_attempts",
+              "type": "number",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "retry_allowed",
+              "displayName": "retry_allowed",
+              "type": "boolean",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "delivery_error_category",
+              "displayName": "delivery_error_category",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Settings": {
+      "main": [
+        [
+          {
+            "node": "Call UrbanEats API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call UrbanEats API": {
+      "main": [
+        [
+          {
+            "node": "Normalize Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Response": {
+      "main": [
+        [
+          {
+            "node": "Retry API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Retry API": {
+      "main": [
+        [
+          {
+            "node": "API Retry Delay",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Claim Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "API Retry Delay": {
+      "main": [
+        [
+          {
+            "node": "Call UrbanEats API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim Run": {
+      "main": [
+        [
+          {
+            "node": "Prepare Audit and Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Audit and Gate": {
+      "main": [
+        [
+          {
+            "node": "Persist Prepared Audit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Persist Prepared Audit": {
+      "main": [
+        [
+          {
+            "node": "Duplicate and TEST_MODE Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Receipts": {
+      "main": [
+        [
+          {
+            "node": "Persist Delivery Audit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Persist Delivery Audit": {
+      "main": [
+        [
+          {
+            "node": "Retry Delivery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Retry Delivery": {
+      "main": [
+        [
+          {
+            "node": "Delivery Retry Delay",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Completed Channel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delivery Retry Delay": {
+      "main": [
+        [
+          {
+            "node": "Retry Channel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Channel Results": {
+      "main": [
+        [
+          {
+            "node": "Complete Audit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Complete Audit": {
+      "main": [
+        [
+          {
+            "node": "Persist Completed Audit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Duplicate and TEST_MODE Gate": {
+      "main": [
+        [
+          {
+            "node": "Slack Required",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Parse Receipts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Required": {
+      "main": [
+        [
+          {
+            "node": "Slack",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Parse Receipts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack": {
+      "main": [
+        [
+          {
+            "node": "Parse Receipts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Retry Channel": {
+      "main": [
+        [
+          {
+            "node": "Slack",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Completed Channel": {
+      "main": [
+        [
+          {
+            "node": "Merge Channel Results",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge Channel Results",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Gmail": {
+      "main": [
+        [
+          {
+            "node": "Parse Receipts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "timezone": "Asia/Kolkata",
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

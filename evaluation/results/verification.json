@@ -1,0 +1,26 @@
+{
+  "phase": 2,
+  "date": "2026-10-03",
+  "python_target": "3.12",
+  "environment": "project .venv, offline copies of existing local packages",
+  "evaluation_command": "python -m evaluation.evaluate",
+  "evaluation_result": "PASS; logistic selected; independent holdout weak; production_ready=false",
+  "pytest_command": "python -m pytest -q --basetemp=.pytest_tmp_final",
+  "pytest_result": {"passed": 34, "failed": 0, "warnings": 2},
+  "warnings": [
+    "Starlette TestClient deprecates its current httpx backend",
+    "sklearn 1.3.2 logistic solver uses SciPy options deprecated for future SciPy 1.18"
+  ],
+  "ruff_command": "ruff check src evaluation scripts tests",
+  "ruff_result": "PASS using locally cached ruff 0.16.10",
+  "dependency_command": "python -m pip check",
+  "dependency_result": "No broken requirements found",
+  "api_smoke_command": "python scripts/smoke_test.py (uvicorn on loopback 8765)",
+  "api_smoke_result": "PASS; health, 24 scored records, invalid/stale DATA_FAILURE",
+  "external_calls": "NONE; loopback HTTP only",
+  "workflow_activation": "NONE",
+  "hosted_llm_calls": "NONE; local provider stubs only",
+  "notifications": "NONE",
+  "git_commit_push": "NONE",
+  "original_preservation": "Notebooks, CSVs, alerts and brief unchanged; original workflow retained in baseline Git, current export identifiers sanitized"
+}

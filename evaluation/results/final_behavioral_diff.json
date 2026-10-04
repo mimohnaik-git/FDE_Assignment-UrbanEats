@@ -1,0 +1,23 @@
+{
+  "result": "PASS",
+  "comparisons": [
+    "red",
+    "green",
+    "support19",
+    "support20",
+    "invalid",
+    "leakage",
+    "stale",
+    "health",
+    "missing_health",
+    "missing_model",
+    "formatter_valid",
+    "formatter_invalid",
+    "formatter_unavailable",
+    "transport_openai/gpt-oss-20b",
+    "request_openai/gpt-oss-20b",
+    "transport_fixture-model",
+    "request_fixture-model"
+  ],
+  "equal": true
+}

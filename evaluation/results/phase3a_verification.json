@@ -1,0 +1,189 @@
+{
+  "phase": "3A",
+  "real_notifications": 0,
+  "hosted_llm_calls": 0,
+  "cases": [
+    {
+      "name": "healthy",
+      "status": "success",
+      "evidence_origin": "api",
+      "routing_status": "RED_ALERT",
+      "attempt_count": 1
+    },
+    {
+      "name": "stopped_api",
+      "status": "success",
+      "evidence_origin": "orchestration",
+      "routing_status": "DATA_FAILURE",
+      "attempt_count": 3,
+      "failure_category": "DNS_SERVICE_FAILURE",
+      "slack": "SKIPPED_TEST_MODE",
+      "gmail": "SKIPPED_TEST_MODE",
+      "duplicate_suppression": false,
+      "audit_events": [
+        "Persist Outage Evidence",
+        "Slack Persist Outage Delivery",
+        "Gmail Persist Outage Delivery",
+        "Persist Completed Outage Audit"
+      ]
+    },
+    {
+      "name": "duplicate_outage",
+      "status": "success",
+      "evidence_origin": "orchestration",
+      "routing_status": "DATA_FAILURE",
+      "attempt_count": 3,
+      "failure_category": "DNS_SERVICE_FAILURE",
+      "slack": "DUPLICATE_SUPPRESSED",
+      "gmail": "DUPLICATE_SUPPRESSED",
+      "duplicate_suppression": true,
+      "audit_events": [
+        "Persist Outage Evidence",
+        "Slack Persist Outage Delivery",
+        "Gmail Persist Outage Delivery",
+        "Persist Completed Outage Audit"
+      ]
+    },
+    {
+      "name": "refused",
+      "status": "success",
+      "evidence_origin": "orchestration",
+      "routing_status": "DATA_FAILURE",
+      "attempt_count": 3,
+      "failure_category": "CONNECTION_REFUSED",
+      "slack": "SKIPPED_TEST_MODE",
+      "gmail": "SKIPPED_TEST_MODE",
+      "duplicate_suppression": false,
+      "audit_events": [
+        "Persist Outage Evidence",
+        "Slack Persist Outage Delivery",
+        "Gmail Persist Outage Delivery",
+        "Persist Completed Outage Audit"
+      ]
+    },
+    {
+      "name": "dns",
+      "status": "success",
+      "evidence_origin": "orchestration",
+      "routing_status": "DATA_FAILURE",
+      "attempt_count": 3,
+      "failure_category": "DNS_SERVICE_FAILURE",
+      "slack": "SKIPPED_TEST_MODE",
+      "gmail": "SKIPPED_TEST_MODE",
+      "duplicate_suppression": false,
+      "audit_events": [
+        "Persist Outage Evidence",
+        "Slack Persist Outage Delivery",
+        "Gmail Persist Outage Delivery",
+        "Persist Completed Outage Audit"
+      ]
+    },
+    {
+      "name": "timeout",
+      "status": "success",
+      "evidence_origin": "orchestration",
+      "routing_status": "DATA_FAILURE",
+      "attempt_count": 3,
+      "failure_category": "TIMEOUT",
+      "slack": "SKIPPED_TEST_MODE",
+      "gmail": "SKIPPED_TEST_MODE",
+      "duplicate_suppression": false,
+      "audit_events": [
+        "Persist Outage Evidence",
+        "Slack Persist Outage Delivery",
+        "Gmail Persist Outage Delivery",
+        "Persist Completed Outage Audit"
+      ]
+    },
+    {
+      "name": "http500",
+      "status": "success",
+      "evidence_origin": "orchestration",
+      "routing_status": "DATA_FAILURE",
+      "attempt_count": 3,
+      "failure_category": "HTTP_5XX",
+      "slack": "SKIPPED_TEST_MODE",
+      "gmail": "SKIPPED_TEST_MODE",
+      "duplicate_suppression": false,
+      "audit_events": [
+        "Persist Outage Evidence",
+        "Slack Persist Outage Delivery",
+        "Gmail Persist Outage Delivery",
+        "Persist Completed Outage Audit"
+      ]
+    },
+    {
+      "name": "http503",
+      "status": "success",
+      "evidence_origin": "orchestration",
+      "routing_status": "DATA_FAILURE",
+      "attempt_count": 3,
+      "failure_category": "HTTP_5XX",
+      "slack": "SKIPPED_TEST_MODE",
+      "gmail": "SKIPPED_TEST_MODE",
+      "duplicate_suppression": false,
+      "audit_events": [
+        "Persist Outage Evidence",
+        "Slack Persist Outage Delivery",
+        "Gmail Persist Outage Delivery",
+        "Persist Completed Outage Audit"
+      ]
+    },
+    {
+      "name": "malformed",
+      "status": "success",
+      "evidence_origin": "orchestration",
+      "routing_status": "DATA_FAILURE",
+      "attempt_count": 3,
+      "failure_category": "MALFORMED_RESPONSE",
+      "slack": "SKIPPED_TEST_MODE",
+      "gmail": "SKIPPED_TEST_MODE",
+      "duplicate_suppression": false,
+      "audit_events": [
+        "Persist Outage Evidence",
+        "Slack Persist Outage Delivery",
+        "Gmail Persist Outage Delivery",
+        "Persist Completed Outage Audit"
+      ]
+    },
+    {
+      "name": "prior_red_body",
+      "status": "success",
+      "evidence_origin": "orchestration",
+      "routing_status": "DATA_FAILURE",
+      "attempt_count": 3,
+      "failure_category": "HTTP_5XX",
+      "slack": "SKIPPED_TEST_MODE",
+      "gmail": "SKIPPED_TEST_MODE",
+      "duplicate_suppression": false,
+      "audit_events": [
+        "Persist Outage Evidence",
+        "Slack Persist Outage Delivery",
+        "Gmail Persist Outage Delivery",
+        "Persist Completed Outage Audit"
+      ]
+    },
+    {
+      "name": "recovery",
+      "status": "success",
+      "evidence_origin": "api",
+      "routing_status": "RED_ALERT",
+      "attempt_count": 2
+    }
+  ],
+  "initial_health": {
+    "status": "READY",
+    "model_version": "UE-23c30780e69023fb",
+    "model_loaded": true,
+    "threshold_loaded": true,
+    "runtime_status": "READY"
+  },
+  "recovered_health": {
+    "status": "READY",
+    "model_version": "UE-23c30780e69023fb",
+    "model_loaded": true,
+    "threshold_loaded": true,
+    "runtime_status": "READY"
+  },
+  "result": "PASS"
+}

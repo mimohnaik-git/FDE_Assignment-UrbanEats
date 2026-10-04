@@ -1,0 +1,20 @@
+{
+  "result": "PASS",
+  "port": 8000,
+  "health": {
+    "status": "READY",
+    "model_version": "UE-23c30780e69023fb",
+    "model_loaded": true,
+    "threshold_loaded": true,
+    "runtime_status": "READY"
+  },
+  "test_mode": true,
+  "routes": [
+    "DATA_FAILURE",
+    "GREEN_SUMMARY",
+    "RED_ALERT"
+  ],
+  "real_notifications": 0,
+  "hosted_llm_calls": 0,
+  "accepted_public_smoke_artifact_overwritten": false
+}

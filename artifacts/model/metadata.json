@@ -1,0 +1,27 @@
+{
+  "model_version": "UE-23c30780e69023fb",
+  "candidate": "logistic",
+  "dependencies": {
+    "scikit-learn": "1.3.2",
+    "numpy": "1.26.4",
+    "pandas": "3.0.1",
+    "scipy": "1.17.1",
+    "joblib": "1.6.0",
+    "threadpoolctl": "3.7.0"
+  },
+  "artifact_sha256": "cefdec41be4ee8e9caa14111141bdb0c99e03918039667019e367ebdccca1fe1",
+  "training_rows": 80,
+  "features": [
+    "restaurant_name",
+    "delivery_zone",
+    "payment_method",
+    "order_value",
+    "discount_applied"
+  ],
+  "seed": 42,
+  "source_sha256": "c1dd8a582d969445b5f83fb39453ee27ac65fcbab86ac64c979659f9b723730c",
+  "target_population": "Cancelled=1, Delivered=0; conditional on these two terminal outcomes",
+  "production_ready": false,
+  "threshold_sha256": "021956e22d45c238974b7a339441323d3cddba023557550fed825c5ae455b974",
+  "feature_contract_sha256": "1775c9f6823b79e6d4d956ef3303ea0f73e18b405204cc64d46962b50db93bac"
+}

@@ -1,0 +1,16 @@
+{
+  "transport": "loopback HTTP only",
+  "health": {
+    "status": "READY",
+    "model_version": "UE-23c30780e69023fb",
+    "external_integrations": "DISABLED_PHASE_2"
+  },
+  "valid_run_id": "UE-b491d5d2328b418db681042750cd0288",
+  "valid_status": "SUCCESS",
+  "valid_routing": "RED_ALERT",
+  "records_scored": 24,
+  "invalid_routing": "DATA_FAILURE",
+  "stale_routing": "DATA_FAILURE",
+  "hosted_llm": "NOT_CALLED",
+  "notifications": "NOT_ENABLED"
+}
