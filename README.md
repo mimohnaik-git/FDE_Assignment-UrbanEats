@@ -1,6 +1,6 @@
 # UrbanEats — placement-time operations intelligence
 
-The accepted runtime uses the **22-node Phase 3B** n8n workflow:
+The runtime uses the **23-node** n8n workflow:
 
 latest placement batch → validation → saved-model inference → supported restaurant-zone
 hotspots → evidence + approved actions → deterministic/LLM-ready briefing → n8n
@@ -9,12 +9,11 @@ orchestration → Slack/Gmail → persistent delivery audit.
 The API owns validation, inference, KPIs/hotspots, evidence/actions, optional compatible
 hosted formatting, factual validation and deterministic fallback. n8n owns the triggers,
 API invocation, independent outage DATA_FAILURE, persistent claims, TEST_MODE gate,
-one Slack node, one Gmail node, receipt handling and delivery audit.
+one Slack node (RED/failure only), one Gmail node (all statuses), receipt handling and delivery audit.
 
 The workflow is inactive, scheduled for **07:30 Asia/Kolkata**, with **TEST_MODE=true**
-and both send nodes disabled/unbound. No credentials or real notifications are configured.
-Phase 3B TEST_MODE has been manually verified end-to-end. Phase 3C channel-policy and
-provider-specific changes have not been implemented.
+and both send nodes disabled/unbound. The portable export contains no credential bindings; local private configuration is separate.
+GREEN summaries require Gmail; RED and DATA_FAILURE require both channels. Hosted formatting is evidence-grounded and blocked by API TEST_MODE. Verification uses disposable state and local receipt mocks.
 
 The model is **exploratory, uncalibrated and conditional on Delivered-vs-Cancelled**;
 there is no production-quality claim. Holdout precision .4167, recall .5556, F1 .4762,
@@ -23,20 +22,29 @@ GREEN means no supported predicted-risk hotspot detected; it is not observed bus
 
 ## Current files and operating instructions
 
-- [Canonical workflow](workflows/n8n/urbaneats_live.json): the only active design/export.
+- [Canonical workflow](workflows/n8n/urbaneats_live.json): the canonical inactive export.
 - [Runtime](docs/RUNTIME.md) and [automation setup](docs/LIVE_AUTOMATION.md).
 - [Feature/prediction-point contract](docs/FEATURE_CONTRACT.md) and [evaluation](docs/EVALUATION.md).
 - [Measured results](evaluation/results/metrics.json) and [cleanup audit](docs/CLEANUP_REPORT.md).
-- [Phase 3B verification](docs/PHASE3B_REPORT.md) and [remaining work](docs/REMEDIATION_PLAN.md).
+- [Final remediation](docs/FINAL_CODE_REMEDIATION.md), [pre-freeze audit](docs/PREFREEZE_AUDIT.md)
+  and [remaining work](docs/REMEDIATION_PLAN.md). Phase reports are historical evidence.
+
+Accepted verification: **148 tests, zero warnings**, 24/24 native verifier cases, and
+actual canonical n8n GREEN/RED/DATA_FAILURE executions all passed. See the
+[final execution evidence](evaluation/results/final_n8n_execution_verification.json).
+All three executions used TEST_MODE, completed without delivery errors, and sent no
+notifications or hosted requests. The model version is `UE-23c30780e69023fb`.
+Local credentials belong only in ignored environment configuration or local n8n bindings;
+never commit credentials, tokens or private recipients.
 
 With the existing Python 3.12 environment and Docker Desktop:
 
 ```powershell
 .venv\Scripts\python.exe -m pytest -q --basetemp=.pytest_tmp_checks
-ruff check .
-.venv\Scripts\python.exe scripts/security_scan.py
-.venv\Scripts\python.exe scripts/build_workflow.py
-.venv\Scripts\python.exe scripts/verify_notification_integration.py
+.venv\Scripts\python.exe -m ruff check .
+.venv\Scripts\python.exe scripts/security_scan.py --output docker/local/checks/security_scan.json
+.venv\Scripts\python.exe scripts/build_workflow.py --output docker/local/remediation/builder_check.json
+.venv\Scripts\python.exe scripts/verify_notification_integration.py --output docker/local/checks/native_verification.json
 Invoke-RestMethod http://127.0.0.1:8000/health
 ```
 

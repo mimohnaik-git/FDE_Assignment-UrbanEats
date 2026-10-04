@@ -1,20 +1,19 @@
-# Current status and deferred work
+# Current status and remaining work
 
-The accepted architecture is Phase 3B: saved-model API plus a 22-node inactive n8n workflow
-with independent outage DATA_FAILURE, bounded retries, persistent duplicate suppression,
-TEST_MODE gates, one Slack/Gmail node each and unified delivery audit. Manual end-to-end
-TEST_MODE verification has been completed. [Current instructions](LIVE_AUTOMATION.md).
+The final architecture consists of the saved-model placement API and the inactive
+23-node n8n workflow. The API owns validation, inference, supported hotspots,
+evidence and grounded briefing. n8n owns independent outage reporting, claims,
+channel policy, bounded retries, receipts and persistent audit.
 
-Phase 3B.1 reconciles the repository and documentation only. Model/data/features/evidence,
-API routing, hotspot policy, schedule, retry/idempotency and TEST_MODE behavior are unchanged.
-No credentials, provider-specific configuration, channel-policy changes or new architecture
-are implemented. Earlier implementation plans are [historical](history/README.md).
+GREEN requires Gmail and skips Slack by policy. RED and DATA_FAILURE require both.
+Portable defaults keep TEST_MODE enabled and notification nodes disabled/unbound.
+Private setup and earlier manual acceptance remain separate from this isolated audit.
+This pass does not repeat live acceptance or authorize activation or external calls.
 
-Remaining work requires a separate authorized phase: channel policy and provider choice,
-credential/OAuth setup and actual receipt validation, live source/units/maturity validation,
-then any decision to activate a schedule. No external action is authorized by this document.
+The model remains exploratory, uncalibrated and conditional Delivered-vs-Cancelled.
+Live-source validity, operational use, provider configuration and any schedule activation
+require their own explicit scope. Preserve model artifacts, datasets, evaluation
+fingerprints and historical verification evidence.
 
-Model remains exploratory, uncalibrated, conditional Delivered-vs-Cancelled; no production
-quality or intervention claim. Preserve the [feature contract](FEATURE_CONTRACT.md),
-[evaluation evidence](EVALUATION.md), assignment baseline and datasets. Model redevelopment
-is outside repository cleanup and outside any assumption of current operational readiness.
+See FINAL_CODE_REMEDIATION.md for current checks and remaining technical debt;
+LIVE_AUTOMATION.md for the canonical operating contract. Historical plans remain in history/.

@@ -1,0 +1,21 @@
+{
+  "artifacts/model/feature_contract.json": "1775c9f6823b79e6d4d956ef3303ea0f73e18b405204cc64d46962b50db93bac",
+  "artifacts/model/metadata.json": "0046a240897ac36f14600ab3a3bc8b861b332494615c06aa46de3bff8d34056a",
+  "artifacts/model/pipeline.joblib": "cefdec41be4ee8e9caa14111141bdb0c99e03918039667019e367ebdccca1fe1",
+  "artifacts/model/threshold.json": "021956e22d45c238974b7a339441323d3cddba023557550fed825c5ae455b974",
+  "data/current_batch.json": "63403f6427d6c08527de24c4fec0427d2b41bd60aa79faa2ca705b4346aa889e",
+  "data/processed/.gitkeep": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "data/raw/README.md": "e04fa0cc9cfdd79e9a027a9ec2bd748ff0eee1e4614d05e02e37bd29c0c8bc33",
+  "urbaneats_delivery_orders.csv": "c1dd8a582d969445b5f83fb39453ee27ac65fcbab86ac64c979659f9b723730c",
+  "urbaneats_delivery_orders_scored.csv": "478d7612fc52e0775004af7d83ba9c3e5b3273b410fdd230a276a6673860f6e7",
+  "UrbanEats_classifier_langchain.ipynb": "d0b46d917eabceaa22ad20b19e93d6e6e38fe0935e3ffc6d06aa18a3cffdb2c4",
+  "UrbanEats_profiling_gx.ipynb": "158c5d1adcbe2d8b9750fcdaf1328742a7a59e317656479f554f72375792e9fe",
+  "docs/FEATURE_CONTRACT.md": "db5da369b21d76c1bdc48aad39050d40c0916a37191e8e8d2fcee3d4c39c4b38",
+  "evaluation/results/metrics.json": "e138db3a62c39a908415d155984a8f761de285e384630709d83274181d5d1c01",
+  "src/urbaneats/evidence.py": "91fd278ec913045f149587a8c38f8b73fb025fc6a2658736eb8f0665644f3ffd",
+  "src/urbaneats/hotspots.py": "60c5334075bb3e61dd1e5307b1232aaa92c0fb5f1e7567e29d925f53d3e5b173",
+  "src/urbaneats/schemas.py": "04843373bb85bcb5621732b4705ab9b697ae5cc6a4571f238d63359c99f5e100",
+  "src/urbaneats/features.py": "5774feece9efcf7775286fd71642bf3470e4c3725e3b4bc252b7914e88df5a71",
+  "src/urbaneats/model.py": "71c92e2598ea90c54fa2c9a03f3ad6ca554bfea37ca1e873aac9d431bb5112df",
+  "evaluation/evaluate.py": "0bb79085e4bcaebd7d6998af4187aaa013ea4969c99f623484165a6230e9faa7"
+}

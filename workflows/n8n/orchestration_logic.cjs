@@ -51,7 +51,7 @@ function constructOutage(context, failure, now) {
     api_service: 'urbaneats-api:8000', source_batch_id: context.source_batch_id,
     test_mode: context.test_mode, notification_required: true,
     attempts: failure.attempt_history};
-  const text = ['UrbanEats automation failure — DATA_FAILURE.',
+  const text = ['UrbanEats automation failure - DATA_FAILURE.',
     'The scoring service could not provide a usable response after bounded attempts.',
     'No GREEN or RED operational assessment was produced. Manual system review is required.',
     `Orchestration run: ${packet.orchestration_run_id}; timestamp: ${now};`,

@@ -1,4 +1,9 @@
-# Phase 3B â€” simplified n8n orchestration
+# Historical Phase-3B verification baseline
+
+Superseded by Phase 3C (23 nodes/channel policy). Counts and behavior below record the
+accepted earlier baseline, not current operating instructions. Use PHASE3C_REPORT.md.
+
+# Phase 3B - simplified n8n orchestration
 
 1. **Old node count:** 79 (verified from the Phase-3A export).
 2. **New node count:** 22, a reduction of 57 nodes (72%). One Slack send node and one

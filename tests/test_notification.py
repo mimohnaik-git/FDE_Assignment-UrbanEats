@@ -29,7 +29,7 @@ def normalize(response, attempt=1, settings=None):
         "now": "2026-10-03T00:00:00Z"})
 
 
-@pytest.mark.parametrize("value", ["", "abc", "source:case-sensitive-A", "रन", "a" * 100])
+@pytest.mark.parametrize("value", ["", "abc", "source:case-sensitive-A", "à¤°à¤¨", "a" * 100])
 def test_claim_hash_matches_sha256(value):
     assert shared("f.identityHash(v)", value) == hashlib.sha256(value.encode()).hexdigest()
 
@@ -104,7 +104,7 @@ def test_shared_gate_skips_both_channels(test_mode, duplicate, state):
 
 def test_small_workflow_single_sends_and_shared_audit():
     workflow = json.loads((ROOT / "workflows/n8n/urbaneats_live.json").read_text())
-    assert len(workflow["nodes"]) == 22
+    assert len(workflow["nodes"]) == 23
     for kind in ["slack", "gmail"]:
         send = [n for n in workflow["nodes"] if n["type"] == "n8n-nodes-base." + kind]
         assert len(send) == 1 and send[0]["disabled"] and not send[0].get("credentials")
@@ -121,7 +121,7 @@ def test_unknown_claim_error_blocks_delivery():
 def test_completion_retains_independent_channel_outcomes():
     prepared = initial()
     rows = []
-    for channel, receipt in [("slack", {"ok": True, "ts": "local-receipt"}),
+    for channel, receipt in [("slack", {"ok": True, "channel": "mock-channel", "message_timestamp": "local-receipt"}),
                              ("gmail", {"error": "ambiguous timeout"})]:
         rows.append(shared("f.notificationReceipt(v.initial,v.channel,v.receipt,1,v.now)", {
             "initial": prepared, "channel": channel, "receipt": receipt,

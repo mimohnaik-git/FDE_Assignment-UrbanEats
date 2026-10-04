@@ -66,7 +66,10 @@ function normalizeNotification(response, settings, execution, attempt, previous,
     evidence_origin: origin, routing_status: api ? api.routing_status : 'DATA_FAILURE',
     api_run_id: api ? api.run_id : null, failure_category: api ? '' : classified.failure_category,
     evidence, text: api ? api.briefing.text : outage.notification_text,
-    subject: `UrbanEats ${api ? api.routing_status : 'DATA_FAILURE'}`};
+    subject: `UrbanEats ${api ? api.routing_status : 'DATA_FAILURE'}`,
+    channel_policy: {slack: !api || api.routing_status !== 'GREEN_SUMMARY', gmail: true},
+    slack_text: api ? api.briefing.channels?.slack_text ?? api.briefing.text : outage.notification_text,
+    gmail_text: api ? api.briefing.channels?.gmail_text ?? api.briefing.text : outage.notification_text};
 }
 
 function notificationAudit(packet, now, event, state, duplicate = false) {
@@ -74,7 +77,8 @@ function notificationAudit(packet, now, event, state, duplicate = false) {
     completed_at: now, api_service: 'urbaneats-api:8000', attempt_count: packet.attempt_count,
     failure_category: packet.failure_category, routing_status: packet.routing_status,
     test_mode: packet.test_mode, duplicate_suppression: duplicate,
-    slack_delivery_state: state, gmail_delivery_state: state, event_type: event,
+    slack_delivery_state: packet.routing_status === 'GREEN_SUMMARY' ? 'SKIPPED_POLICY' : state,
+    gmail_delivery_state: state, event_type: event,
     // Retain Phase-3A columns; packet_json is stored inside evidence_json for schema compatibility.
     evidence_json: JSON.stringify({packet, evidence: packet.evidence}), delivery_channel: '',
     slack_attempts: 0, gmail_attempts: 0, retry_allowed: false, delivery_error_category: ''};
@@ -92,19 +96,27 @@ function prepareNotificationClaim(result, packet, now) {
 function notificationReceipt(initial, channel, receipt, attempt, now) {
   const packet = JSON.parse(initial.evidence_json).packet;
   const row = notificationAudit(packet, now, 'delivery_attempt', 'PENDING', initial.duplicate_suppression);
-  const skipped = initial.duplicate_suppression || packet.test_mode;
-  const ok = channel === 'slack' ? receipt.ok === true && typeof receipt.ts === 'string'
-    : typeof receipt.id === 'string' && !receipt.error;
+  const policySkip = channel === 'slack' && packet.routing_status === 'GREEN_SUMMARY';
+  const skipped = policySkip || initial.duplicate_suppression || packet.test_mode;
+  const slackTimestamp = receipt?.message_timestamp ?? receipt?.message?.ts;
+  // A disabled node returns the upstream audit item unchanged, not a send receipt.
+  const passThrough = !skipped && receipt && typeof receipt === 'object'
+    && Object.keys(receipt).length === Object.keys(initial).length
+    && Object.keys(initial).every(key => JSON.stringify(receipt[key]) === JSON.stringify(initial[key]));
+  const ok = !passThrough && (channel === 'slack' ? receipt.ok === true
+    && typeof receipt.channel === 'string' && receipt.channel.trim().length > 0
+    && typeof slackTimestamp === 'string' && slackTimestamp.trim().length > 0
+    : typeof receipt.id === 'string' && !receipt.error);
   const rate = channel === 'slack'
     ? receipt.ok === false && ['ratelimited', 'rate_limited'].includes(receipt.error)
     : receipt.statusCode === 429 || receipt.error?.statusCode === 429;
-  const state = skipped ? initial[`${channel}_delivery_state`] : ok ? 'SUCCESS' : rate ? 'FAILURE' : 'UNKNOWN';
+  const state = policySkip ? 'SKIPPED_POLICY' : skipped ? initial[`${channel}_delivery_state`] : ok ? 'SUCCESS' : rate ? 'FAILURE' : 'UNKNOWN';
   row[`${channel}_delivery_state`] = state;
   row.delivery_channel = channel;
-  row[`${channel}_attempts`] = skipped ? 0 : attempt;
-  row.retry_allowed = !skipped && rate && attempt < 3;
-  row.delivery_error_category = skipped || ok ? '' : rate ? 'RATE_LIMITED' : 'UNVERIFIED_RECEIPT';
-  row.event_type = skipped ? 'delivery_skipped' : 'delivery_attempt';
+  row[`${channel}_attempts`] = skipped || passThrough ? 0 : attempt;
+  row.retry_allowed = !skipped && !passThrough && rate && attempt < 3;
+  row.delivery_error_category = skipped || ok ? '' : passThrough ? 'CHANNEL_NOT_SENT' : rate ? 'RATE_LIMITED' : 'UNVERIFIED_RECEIPT';
+  row.event_type = skipped ? 'delivery_skipped' : passThrough ? 'delivery_not_sent' : 'delivery_attempt';
   return row;
 }
 
@@ -120,6 +132,10 @@ function completeNotification(initial, rows, now) {
     row[`${channel}_delivery_state`] = result[`${channel}_delivery_state`];
     row[`${channel}_attempts`] = result[`${channel}_attempts`];
   }
+  if (['slack', 'gmail'].some(channel => row[`${channel}_delivery_state`] === 'UNKNOWN'))
+    row.event_type = 'notification_unverified';
+  else if (['slack', 'gmail'].some(channel => row[`${channel}_delivery_state`] === 'FAILURE'))
+    row.event_type = 'notification_failed';
   return row;
 }
 

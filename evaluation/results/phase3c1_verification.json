@@ -1,0 +1,61 @@
+{
+  "phase": "3C.2",
+  "root_cause": "Canonical fact formatter already emitted Current batch; limitation spacing was in render assembly and is now centralized. Reported combined defect did not reproduce; likely stale rendered output, historical producer unknown.",
+  "pytest": {
+    "passed": 128,
+    "warnings": 2
+  },
+  "ruff": "PASS",
+  "git_diff_check": "PASS",
+  "n8n": {
+    "version": "2.41.6",
+    "import": "PASS",
+    "executions": 23,
+    "result": "PASS"
+  },
+  "docker_health": {
+    "status": "READY",
+    "model_version": "UE-23c30780e69023fb",
+    "model_loaded": true,
+    "threshold_loaded": true,
+    "runtime_status": "READY"
+  },
+  "protected_current_hashes_unchanged": 19,
+  "prior_phase3c_hash_matches": 18,
+  "prior_snapshot_difference": "ignored data/current_batch.json differs before this repair; untouched",
+  "nodes": 23,
+  "real_notifications": 0,
+  "live_groq_calls": 0,
+  "api_test_mode_after_verification": true,
+  "security_findings": 0,
+  "recommendation": "READY FOR SECOND GROQ CREDENTIAL TEST",
+  "files_changed_this_phase": [
+    "src/urbaneats/provider.py",
+    "src/urbaneats/briefing.py",
+    "src/urbaneats/presentation.py",
+    "src/urbaneats/service.py",
+    "workflows/n8n/orchestration_logic.cjs",
+    "workflows/n8n/urbaneats_live.json",
+    "scripts/verify_notification_integration.py",
+    "tests/test_phase3c1.py",
+    "docs/LIVE_AUTOMATION.md",
+    "docs/RUNTIME.md",
+    "docs/PHASE3C1_REPORT.md",
+    "evaluation/results/phase3c1_native_verification.json",
+    "evaluation/results/phase3c1_protected.json",
+    "evaluation/results/phase3c1_verification.json",
+    "evaluation/results/security_scan.json"
+  ],
+  "native_import": "PASS",
+  "native_executions": 23,
+  "native_result": "PASS",
+  "security_scan_files": 97,
+  "changed_files": [
+    "src/urbaneats/briefing.py",
+    "tests/test_phase3c1.py",
+    "docs/PHASE3C1_REPORT.md",
+    "evaluation/results/phase3c1_native_verification.json",
+    "evaluation/results/phase3c1_verification.json",
+    "evaluation/results/security_scan.json"
+  ]
+}

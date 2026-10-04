@@ -91,7 +91,7 @@ def test_hosted_transport_offline(config, batch, monkeypatch, mode):
         items = [
             {
                 "evidence_id": f["evidence_id"],
-                "text": sentences[f["evidence_id"]],
+                "text": sentences[f["evidence_id"]] + f" [evidence:{f['evidence_id']}]",
                 "action_ids": f["approved_action_ids"],
             }
             for f in packet["facts"]

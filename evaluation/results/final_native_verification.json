@@ -1,0 +1,1673 @@
+{
+  "phase": "3C.3",
+  "result": "PASS",
+  "real_notifications": 0,
+  "hosted_llm_calls": 0,
+  "cases": [
+    {
+      "name": "healthy",
+      "status": "success",
+      "evidence_origin": "api",
+      "routing_status": "RED_ALERT",
+      "attempt_count": 1,
+      "failure_category": "",
+      "slack": "SKIPPED_TEST_MODE",
+      "gmail": "SKIPPED_TEST_MODE",
+      "slack_attempts": 0,
+      "gmail_attempts": 0,
+      "duplicate_suppression": false,
+      "event_type": "notification_complete"
+    },
+    {
+      "name": "duplicate_healthy",
+      "status": "success",
+      "evidence_origin": "api",
+      "routing_status": "RED_ALERT",
+      "attempt_count": 1,
+      "failure_category": "",
+      "slack": "DUPLICATE_SUPPRESSED",
+      "gmail": "DUPLICATE_SUPPRESSED",
+      "slack_attempts": 0,
+      "gmail_attempts": 0,
+      "duplicate_suppression": true,
+      "event_type": "notification_complete"
+    },
+    {
+      "name": "green",
+      "status": "success",
+      "evidence_origin": "api",
+      "routing_status": "GREEN_SUMMARY",
+      "attempt_count": 1,
+      "failure_category": "",
+      "slack": "SKIPPED_POLICY",
+      "gmail": "SKIPPED_TEST_MODE",
+      "slack_attempts": 0,
+      "gmail_attempts": 0,
+      "duplicate_suppression": false,
+      "event_type": "notification_complete"
+    },
+    {
+      "name": "data_failure",
+      "status": "success",
+      "evidence_origin": "api",
+      "routing_status": "DATA_FAILURE",
+      "attempt_count": 1,
+      "failure_category": "",
+      "slack": "SKIPPED_TEST_MODE",
+      "gmail": "SKIPPED_TEST_MODE",
+      "slack_attempts": 0,
+      "gmail_attempts": 0,
+      "duplicate_suppression": false,
+      "event_type": "notification_complete"
+    },
+    {
+      "name": "stopped_api",
+      "status": "success",
+      "evidence_origin": "orchestration",
+      "routing_status": "DATA_FAILURE",
+      "attempt_count": 3,
+      "failure_category": "DNS_SERVICE_FAILURE",
+      "slack": "SKIPPED_TEST_MODE",
+      "gmail": "SKIPPED_TEST_MODE",
+      "slack_attempts": 0,
+      "gmail_attempts": 0,
+      "duplicate_suppression": false,
+      "event_type": "notification_complete"
+    },
+    {
+      "name": "duplicate_stopped_api",
+      "status": "success",
+      "evidence_origin": "orchestration",
+      "routing_status": "DATA_FAILURE",
+      "attempt_count": 3,
+      "failure_category": "DNS_SERVICE_FAILURE",
+      "slack": "DUPLICATE_SUPPRESSED",
+      "gmail": "DUPLICATE_SUPPRESSED",
+      "slack_attempts": 0,
+      "gmail_attempts": 0,
+      "duplicate_suppression": true,
+      "event_type": "notification_complete"
+    },
+    {
+      "name": "refused",
+      "status": "success",
+      "evidence_origin": "orchestration",
+      "routing_status": "DATA_FAILURE",
+      "attempt_count": 3,
+      "failure_category": "CONNECTION_REFUSED",
+      "slack": "SKIPPED_TEST_MODE",
+      "gmail": "SKIPPED_TEST_MODE",
+      "slack_attempts": 0,
+      "gmail_attempts": 0,
+      "duplicate_suppression": false,
+      "event_type": "notification_complete"
+    },
+    {
+      "name": "dns",
+      "status": "success",
+      "evidence_origin": "orchestration",
+      "routing_status": "DATA_FAILURE",
+      "attempt_count": 3,
+      "failure_category": "DNS_SERVICE_FAILURE",
+      "slack": "SKIPPED_TEST_MODE",
+      "gmail": "SKIPPED_TEST_MODE",
+      "slack_attempts": 0,
+      "gmail_attempts": 0,
+      "duplicate_suppression": false,
+      "event_type": "notification_complete"
+    },
+    {
+      "name": "timeout",
+      "status": "success",
+      "evidence_origin": "orchestration",
+      "routing_status": "DATA_FAILURE",
+      "attempt_count": 3,
+      "failure_category": "TIMEOUT",
+      "slack": "SKIPPED_TEST_MODE",
+      "gmail": "SKIPPED_TEST_MODE",
+      "slack_attempts": 0,
+      "gmail_attempts": 0,
+      "duplicate_suppression": false,
+      "event_type": "notification_complete"
+    },
+    {
+      "name": "http500",
+      "status": "success",
+      "evidence_origin": "orchestration",
+      "routing_status": "DATA_FAILURE",
+      "attempt_count": 3,
+      "failure_category": "HTTP_5XX",
+      "slack": "SKIPPED_TEST_MODE",
+      "gmail": "SKIPPED_TEST_MODE",
+      "slack_attempts": 0,
+      "gmail_attempts": 0,
+      "duplicate_suppression": false,
+      "event_type": "notification_complete"
+    },
+    {
+      "name": "http503",
+      "status": "success",
+      "evidence_origin": "orchestration",
+      "routing_status": "DATA_FAILURE",
+      "attempt_count": 3,
+      "failure_category": "HTTP_5XX",
+      "slack": "SKIPPED_TEST_MODE",
+      "gmail": "SKIPPED_TEST_MODE",
+      "slack_attempts": 0,
+      "gmail_attempts": 0,
+      "duplicate_suppression": false,
+      "event_type": "notification_complete"
+    },
+    {
+      "name": "malformed",
+      "status": "success",
+      "evidence_origin": "orchestration",
+      "routing_status": "DATA_FAILURE",
+      "attempt_count": 3,
+      "failure_category": "MALFORMED_RESPONSE",
+      "slack": "SKIPPED_TEST_MODE",
+      "gmail": "SKIPPED_TEST_MODE",
+      "slack_attempts": 0,
+      "gmail_attempts": 0,
+      "duplicate_suppression": false,
+      "event_type": "notification_complete"
+    },
+    {
+      "name": "prior_red_body",
+      "status": "success",
+      "evidence_origin": "orchestration",
+      "routing_status": "DATA_FAILURE",
+      "attempt_count": 3,
+      "failure_category": "HTTP_5XX",
+      "slack": "SKIPPED_TEST_MODE",
+      "gmail": "SKIPPED_TEST_MODE",
+      "slack_attempts": 0,
+      "gmail_attempts": 0,
+      "duplicate_suppression": false,
+      "event_type": "notification_complete"
+    },
+    {
+      "name": "recovery",
+      "status": "success",
+      "evidence_origin": "api",
+      "routing_status": "RED_ALERT",
+      "attempt_count": 1,
+      "failure_category": "",
+      "slack": "SKIPPED_TEST_MODE",
+      "gmail": "SKIPPED_TEST_MODE",
+      "slack_attempts": 0,
+      "gmail_attempts": 0,
+      "duplicate_suppression": false,
+      "event_type": "notification_complete"
+    },
+    {
+      "name": "mock_retry",
+      "status": "success",
+      "evidence_origin": "api",
+      "routing_status": "RED_ALERT",
+      "attempt_count": 1,
+      "failure_category": "",
+      "slack": "SUCCESS",
+      "gmail": "SUCCESS",
+      "slack_attempts": 3,
+      "gmail_attempts": 2,
+      "duplicate_suppression": false,
+      "event_type": "notification_complete"
+    },
+    {
+      "name": "duplicate_mock_retry",
+      "status": "success",
+      "evidence_origin": "api",
+      "routing_status": "RED_ALERT",
+      "attempt_count": 1,
+      "failure_category": "",
+      "slack": "DUPLICATE_SUPPRESSED",
+      "gmail": "DUPLICATE_SUPPRESSED",
+      "slack_attempts": 0,
+      "gmail_attempts": 0,
+      "duplicate_suppression": true,
+      "event_type": "notification_complete"
+    },
+    {
+      "name": "mock_unknown",
+      "status": "success",
+      "evidence_origin": "api",
+      "routing_status": "RED_ALERT",
+      "attempt_count": 1,
+      "failure_category": "",
+      "slack": "UNKNOWN",
+      "gmail": "UNKNOWN",
+      "slack_attempts": 1,
+      "gmail_attempts": 1,
+      "duplicate_suppression": false,
+      "event_type": "notification_unverified"
+    },
+    {
+      "name": "mock_green",
+      "status": "success",
+      "evidence_origin": "api",
+      "routing_status": "GREEN_SUMMARY",
+      "attempt_count": 1,
+      "failure_category": "",
+      "slack": "SKIPPED_POLICY",
+      "gmail": "SUCCESS",
+      "slack_attempts": 0,
+      "gmail_attempts": 1,
+      "duplicate_suppression": false,
+      "event_type": "notification_complete"
+    },
+    {
+      "name": "duplicate_mock_green",
+      "status": "success",
+      "evidence_origin": "api",
+      "routing_status": "GREEN_SUMMARY",
+      "attempt_count": 1,
+      "failure_category": "",
+      "slack": "SKIPPED_POLICY",
+      "gmail": "DUPLICATE_SUPPRESSED",
+      "slack_attempts": 0,
+      "gmail_attempts": 0,
+      "duplicate_suppression": true,
+      "event_type": "notification_complete"
+    },
+    {
+      "name": "mock_slack_failure",
+      "status": "success",
+      "evidence_origin": "api",
+      "routing_status": "RED_ALERT",
+      "attempt_count": 1,
+      "failure_category": "",
+      "slack": "UNKNOWN",
+      "gmail": "SUCCESS",
+      "slack_attempts": 1,
+      "gmail_attempts": 1,
+      "duplicate_suppression": false,
+      "event_type": "notification_unverified"
+    },
+    {
+      "name": "mock_gmail_failure",
+      "status": "success",
+      "evidence_origin": "api",
+      "routing_status": "RED_ALERT",
+      "attempt_count": 1,
+      "failure_category": "",
+      "slack": "SUCCESS",
+      "gmail": "UNKNOWN",
+      "slack_attempts": 1,
+      "gmail_attempts": 1,
+      "duplicate_suppression": false,
+      "event_type": "notification_unverified"
+    },
+    {
+      "name": "mock_slack_rejected",
+      "status": "success",
+      "evidence_origin": "api",
+      "routing_status": "RED_ALERT",
+      "attempt_count": 1,
+      "failure_category": "",
+      "slack": "FAILURE",
+      "gmail": "SUCCESS",
+      "slack_attempts": 3,
+      "gmail_attempts": 1,
+      "duplicate_suppression": false,
+      "event_type": "notification_failed"
+    },
+    {
+      "name": "mock_gmail_rejected",
+      "status": "success",
+      "evidence_origin": "api",
+      "routing_status": "RED_ALERT",
+      "attempt_count": 1,
+      "failure_category": "",
+      "slack": "SUCCESS",
+      "gmail": "FAILURE",
+      "slack_attempts": 1,
+      "gmail_attempts": 3,
+      "duplicate_suppression": false,
+      "event_type": "notification_failed"
+    },
+    {
+      "name": "mock_gmail_disabled",
+      "status": "success",
+      "evidence_origin": "api",
+      "routing_status": "RED_ALERT",
+      "attempt_count": 1,
+      "failure_category": "",
+      "slack": "SUCCESS",
+      "gmail": "UNKNOWN",
+      "slack_attempts": 1,
+      "gmail_attempts": 0,
+      "duplicate_suppression": false,
+      "event_type": "notification_unverified"
+    }
+  ],
+  "started_monotonic": 17843.093,
+  "current_stage": "cleanup",
+  "stages": [
+    {
+      "stage": "fixture preparation",
+      "state": "started",
+      "elapsed_seconds": 0.0
+    },
+    {
+      "stage": "fixture preparation",
+      "state": "completed",
+      "elapsed_seconds": 0.11
+    },
+    {
+      "stage": "initial API health",
+      "state": "started",
+      "elapsed_seconds": 0.11
+    },
+    {
+      "stage": "API TEST_MODE safety",
+      "state": "started",
+      "elapsed_seconds": 0.344
+    },
+    {
+      "stage": "API TEST_MODE safety",
+      "state": "completed",
+      "elapsed_seconds": 1.485
+    },
+    {
+      "stage": "disposable container creation",
+      "state": "started",
+      "elapsed_seconds": 1.485
+    },
+    {
+      "stage": "disposable container creation",
+      "state": "completed",
+      "elapsed_seconds": 5.032
+    },
+    {
+      "stage": "CLI initialization",
+      "state": "started",
+      "elapsed_seconds": 5.032
+    },
+    {
+      "stage": "CLI initialization",
+      "state": "completed",
+      "elapsed_seconds": 7.016
+    },
+    {
+      "stage": "public workflow import",
+      "state": "started",
+      "elapsed_seconds": 7.016
+    },
+    {
+      "stage": "public workflow import",
+      "state": "completed",
+      "elapsed_seconds": 55.625
+    },
+    {
+      "stage": "fixture server",
+      "state": "started",
+      "elapsed_seconds": 55.625
+    },
+    {
+      "stage": "fixture server",
+      "state": "completed",
+      "elapsed_seconds": 58.985
+    },
+    {
+      "stage": "native case healthy",
+      "state": "started",
+      "elapsed_seconds": 58.985
+    },
+    {
+      "stage": "healthy workflow import",
+      "state": "started",
+      "elapsed_seconds": 58.985
+    },
+    {
+      "stage": "healthy workflow import",
+      "state": "completed",
+      "elapsed_seconds": 71.516
+    },
+    {
+      "stage": "native execution healthy",
+      "state": "started",
+      "elapsed_seconds": 71.516
+    },
+    {
+      "stage": "native execution healthy",
+      "state": "started",
+      "elapsed_seconds": 98.078
+    },
+    {
+      "stage": "native case healthy",
+      "state": "completed",
+      "elapsed_seconds": 152.5
+    },
+    {
+      "stage": "native case green",
+      "state": "started",
+      "elapsed_seconds": 152.5
+    },
+    {
+      "stage": "green workflow import",
+      "state": "started",
+      "elapsed_seconds": 152.5
+    },
+    {
+      "stage": "green workflow import",
+      "state": "completed",
+      "elapsed_seconds": 178.688
+    },
+    {
+      "stage": "native execution green",
+      "state": "started",
+      "elapsed_seconds": 178.688
+    },
+    {
+      "stage": "native case green",
+      "state": "completed",
+      "elapsed_seconds": 196.047
+    },
+    {
+      "stage": "native case data_failure",
+      "state": "started",
+      "elapsed_seconds": 196.047
+    },
+    {
+      "stage": "data_failure workflow import",
+      "state": "started",
+      "elapsed_seconds": 196.11
+    },
+    {
+      "stage": "data_failure workflow import",
+      "state": "completed",
+      "elapsed_seconds": 206.594
+    },
+    {
+      "stage": "native execution data_failure",
+      "state": "started",
+      "elapsed_seconds": 206.594
+    },
+    {
+      "stage": "native case data_failure",
+      "state": "completed",
+      "elapsed_seconds": 231.157
+    },
+    {
+      "stage": "native case stopped_api",
+      "state": "started",
+      "elapsed_seconds": 231.157
+    },
+    {
+      "stage": "stopped_api workflow import",
+      "state": "started",
+      "elapsed_seconds": 237.672
+    },
+    {
+      "stage": "stopped_api workflow import",
+      "state": "completed",
+      "elapsed_seconds": 253.094
+    },
+    {
+      "stage": "native execution stopped_api",
+      "state": "started",
+      "elapsed_seconds": 253.094
+    },
+    {
+      "stage": "native execution stopped_api",
+      "state": "started",
+      "elapsed_seconds": 282.766
+    },
+    {
+      "stage": "native case stopped_api",
+      "state": "completed",
+      "elapsed_seconds": 309.063
+    },
+    {
+      "stage": "native case refused",
+      "state": "started",
+      "elapsed_seconds": 309.063
+    },
+    {
+      "stage": "refused workflow import",
+      "state": "started",
+      "elapsed_seconds": 316.532
+    },
+    {
+      "stage": "refused workflow import",
+      "state": "completed",
+      "elapsed_seconds": 325.969
+    },
+    {
+      "stage": "native execution refused",
+      "state": "started",
+      "elapsed_seconds": 325.969
+    },
+    {
+      "stage": "native case refused",
+      "state": "completed",
+      "elapsed_seconds": 341.407
+    },
+    {
+      "stage": "native case dns",
+      "state": "started",
+      "elapsed_seconds": 341.407
+    },
+    {
+      "stage": "dns workflow import",
+      "state": "started",
+      "elapsed_seconds": 341.407
+    },
+    {
+      "stage": "dns workflow import",
+      "state": "completed",
+      "elapsed_seconds": 348.422
+    },
+    {
+      "stage": "native execution dns",
+      "state": "started",
+      "elapsed_seconds": 348.422
+    },
+    {
+      "stage": "native case dns",
+      "state": "completed",
+      "elapsed_seconds": 374.563
+    },
+    {
+      "stage": "native case timeout",
+      "state": "started",
+      "elapsed_seconds": 374.563
+    },
+    {
+      "stage": "timeout workflow import",
+      "state": "started",
+      "elapsed_seconds": 374.563
+    },
+    {
+      "stage": "timeout workflow import",
+      "state": "completed",
+      "elapsed_seconds": 383.844
+    },
+    {
+      "stage": "native execution timeout",
+      "state": "started",
+      "elapsed_seconds": 383.844
+    },
+    {
+      "stage": "native case timeout",
+      "state": "completed",
+      "elapsed_seconds": 401.672
+    },
+    {
+      "stage": "native case http500",
+      "state": "started",
+      "elapsed_seconds": 401.672
+    },
+    {
+      "stage": "http500 workflow import",
+      "state": "started",
+      "elapsed_seconds": 401.672
+    },
+    {
+      "stage": "http500 workflow import",
+      "state": "completed",
+      "elapsed_seconds": 412.688
+    },
+    {
+      "stage": "native execution http500",
+      "state": "started",
+      "elapsed_seconds": 412.688
+    },
+    {
+      "stage": "native case http500",
+      "state": "completed",
+      "elapsed_seconds": 425.625
+    },
+    {
+      "stage": "native case http503",
+      "state": "started",
+      "elapsed_seconds": 425.625
+    },
+    {
+      "stage": "http503 workflow import",
+      "state": "started",
+      "elapsed_seconds": 425.625
+    },
+    {
+      "stage": "http503 workflow import",
+      "state": "completed",
+      "elapsed_seconds": 432.563
+    },
+    {
+      "stage": "native execution http503",
+      "state": "started",
+      "elapsed_seconds": 432.563
+    },
+    {
+      "stage": "native case http503",
+      "state": "completed",
+      "elapsed_seconds": 454.297
+    },
+    {
+      "stage": "native case malformed",
+      "state": "started",
+      "elapsed_seconds": 454.297
+    },
+    {
+      "stage": "malformed workflow import",
+      "state": "started",
+      "elapsed_seconds": 454.297
+    },
+    {
+      "stage": "malformed workflow import",
+      "state": "completed",
+      "elapsed_seconds": 464.063
+    },
+    {
+      "stage": "native execution malformed",
+      "state": "started",
+      "elapsed_seconds": 464.063
+    },
+    {
+      "stage": "native case malformed",
+      "state": "completed",
+      "elapsed_seconds": 480.047
+    },
+    {
+      "stage": "native case prior_red_body",
+      "state": "started",
+      "elapsed_seconds": 480.047
+    },
+    {
+      "stage": "prior_red_body workflow import",
+      "state": "started",
+      "elapsed_seconds": 480.047
+    },
+    {
+      "stage": "prior_red_body workflow import",
+      "state": "completed",
+      "elapsed_seconds": 494.61
+    },
+    {
+      "stage": "native execution prior_red_body",
+      "state": "started",
+      "elapsed_seconds": 494.61
+    },
+    {
+      "stage": "native case prior_red_body",
+      "state": "completed",
+      "elapsed_seconds": 509.985
+    },
+    {
+      "stage": "native case recovery",
+      "state": "started",
+      "elapsed_seconds": 509.985
+    },
+    {
+      "stage": "recovery workflow import",
+      "state": "started",
+      "elapsed_seconds": 509.985
+    },
+    {
+      "stage": "recovery workflow import",
+      "state": "completed",
+      "elapsed_seconds": 517.86
+    },
+    {
+      "stage": "native execution recovery",
+      "state": "started",
+      "elapsed_seconds": 517.86
+    },
+    {
+      "stage": "native case recovery",
+      "state": "completed",
+      "elapsed_seconds": 535.172
+    },
+    {
+      "stage": "native case mock_retry",
+      "state": "started",
+      "elapsed_seconds": 535.172
+    },
+    {
+      "stage": "mock_retry workflow import",
+      "state": "started",
+      "elapsed_seconds": 535.172
+    },
+    {
+      "stage": "mock_retry workflow import",
+      "state": "completed",
+      "elapsed_seconds": 543.125
+    },
+    {
+      "stage": "native execution mock_retry",
+      "state": "started",
+      "elapsed_seconds": 543.125
+    },
+    {
+      "stage": "native execution mock_retry",
+      "state": "started",
+      "elapsed_seconds": 557.5
+    },
+    {
+      "stage": "native case mock_retry",
+      "state": "completed",
+      "elapsed_seconds": 575.047
+    },
+    {
+      "stage": "native case mock_unknown",
+      "state": "started",
+      "elapsed_seconds": 575.047
+    },
+    {
+      "stage": "mock_unknown workflow import",
+      "state": "started",
+      "elapsed_seconds": 575.047
+    },
+    {
+      "stage": "mock_unknown workflow import",
+      "state": "completed",
+      "elapsed_seconds": 581.797
+    },
+    {
+      "stage": "native execution mock_unknown",
+      "state": "started",
+      "elapsed_seconds": 581.797
+    },
+    {
+      "stage": "native case mock_unknown",
+      "state": "completed",
+      "elapsed_seconds": 593.313
+    },
+    {
+      "stage": "native case mock_green",
+      "state": "started",
+      "elapsed_seconds": 593.313
+    },
+    {
+      "stage": "mock_green workflow import",
+      "state": "started",
+      "elapsed_seconds": 593.313
+    },
+    {
+      "stage": "mock_green workflow import",
+      "state": "completed",
+      "elapsed_seconds": 601.407
+    },
+    {
+      "stage": "native execution mock_green",
+      "state": "started",
+      "elapsed_seconds": 601.407
+    },
+    {
+      "stage": "native execution mock_green",
+      "state": "started",
+      "elapsed_seconds": 613.907
+    },
+    {
+      "stage": "native case mock_green",
+      "state": "completed",
+      "elapsed_seconds": 627.782
+    },
+    {
+      "stage": "native case mock_slack_failure",
+      "state": "started",
+      "elapsed_seconds": 627.782
+    },
+    {
+      "stage": "mock_slack_failure workflow import",
+      "state": "started",
+      "elapsed_seconds": 627.782
+    },
+    {
+      "stage": "mock_slack_failure workflow import",
+      "state": "completed",
+      "elapsed_seconds": 635.828
+    },
+    {
+      "stage": "native execution mock_slack_failure",
+      "state": "started",
+      "elapsed_seconds": 635.828
+    },
+    {
+      "stage": "native case mock_slack_failure",
+      "state": "completed",
+      "elapsed_seconds": 648.36
+    },
+    {
+      "stage": "native case mock_gmail_failure",
+      "state": "started",
+      "elapsed_seconds": 648.36
+    },
+    {
+      "stage": "mock_gmail_failure workflow import",
+      "state": "started",
+      "elapsed_seconds": 648.36
+    },
+    {
+      "stage": "mock_gmail_failure workflow import",
+      "state": "completed",
+      "elapsed_seconds": 655.235
+    },
+    {
+      "stage": "native execution mock_gmail_failure",
+      "state": "started",
+      "elapsed_seconds": 655.235
+    },
+    {
+      "stage": "native case mock_gmail_failure",
+      "state": "completed",
+      "elapsed_seconds": 665.828
+    },
+    {
+      "stage": "native case mock_slack_rejected",
+      "state": "started",
+      "elapsed_seconds": 665.828
+    },
+    {
+      "stage": "mock_slack_rejected workflow import",
+      "state": "started",
+      "elapsed_seconds": 665.828
+    },
+    {
+      "stage": "mock_slack_rejected workflow import",
+      "state": "completed",
+      "elapsed_seconds": 675.172
+    },
+    {
+      "stage": "native execution mock_slack_rejected",
+      "state": "started",
+      "elapsed_seconds": 675.172
+    },
+    {
+      "stage": "native case mock_slack_rejected",
+      "state": "completed",
+      "elapsed_seconds": 688.922
+    },
+    {
+      "stage": "native case mock_gmail_rejected",
+      "state": "started",
+      "elapsed_seconds": 688.922
+    },
+    {
+      "stage": "mock_gmail_rejected workflow import",
+      "state": "started",
+      "elapsed_seconds": 688.922
+    },
+    {
+      "stage": "mock_gmail_rejected workflow import",
+      "state": "completed",
+      "elapsed_seconds": 696.86
+    },
+    {
+      "stage": "native execution mock_gmail_rejected",
+      "state": "started",
+      "elapsed_seconds": 696.86
+    },
+    {
+      "stage": "native case mock_gmail_rejected",
+      "state": "completed",
+      "elapsed_seconds": 710.797
+    },
+    {
+      "stage": "native case mock_gmail_disabled",
+      "state": "started",
+      "elapsed_seconds": 710.797
+    },
+    {
+      "stage": "mock_gmail_disabled workflow import",
+      "state": "started",
+      "elapsed_seconds": 710.797
+    },
+    {
+      "stage": "mock_gmail_disabled workflow import",
+      "state": "completed",
+      "elapsed_seconds": 719.938
+    },
+    {
+      "stage": "native execution mock_gmail_disabled",
+      "state": "started",
+      "elapsed_seconds": 719.938
+    },
+    {
+      "stage": "native case mock_gmail_disabled",
+      "state": "completed",
+      "elapsed_seconds": 732.782
+    },
+    {
+      "stage": "cleanup",
+      "state": "started",
+      "elapsed_seconds": 732.813
+    },
+    {
+      "stage": "cleanup",
+      "state": "completed",
+      "elapsed_seconds": 736.36
+    }
+  ],
+  "initial_health": {
+    "status": "READY",
+    "model_version": "UE-23c30780e69023fb",
+    "model_loaded": true,
+    "threshold_loaded": true,
+    "runtime_status": "READY"
+  },
+  "imports": {
+    "public": {
+      "markers": [
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "database migration started",
+        "database migration completed",
+        "Importing 1 workflows...",
+        "Successfully imported 1 workflow."
+      ],
+      "log_bytes": 33404,
+      "log_sha256": "109845c5cc551bbdd944f0251c6c79c9df3e91885ffa3c062bdc4b37da2cac44"
+    },
+    "healthy": {
+      "markers": [
+        "Importing 1 workflows...",
+        "Successfully imported 1 workflow."
+      ],
+      "log_bytes": 58,
+      "log_sha256": "41ff4600d6b83e86a4b8a8ceab04f6bb9348d873f4b61471a4eb6cf07581903c"
+    },
+    "green": {
+      "markers": [
+        "Importing 1 workflows...",
+        "Successfully imported 1 workflow."
+      ],
+      "log_bytes": 58,
+      "log_sha256": "41ff4600d6b83e86a4b8a8ceab04f6bb9348d873f4b61471a4eb6cf07581903c"
+    },
+    "data_failure": {
+      "markers": [
+        "Importing 1 workflows...",
+        "Successfully imported 1 workflow."
+      ],
+      "log_bytes": 58,
+      "log_sha256": "41ff4600d6b83e86a4b8a8ceab04f6bb9348d873f4b61471a4eb6cf07581903c"
+    },
+    "stopped_api": {
+      "markers": [
+        "Importing 1 workflows...",
+        "Successfully imported 1 workflow."
+      ],
+      "log_bytes": 58,
+      "log_sha256": "41ff4600d6b83e86a4b8a8ceab04f6bb9348d873f4b61471a4eb6cf07581903c"
+    },
+    "refused": {
+      "markers": [
+        "Importing 1 workflows...",
+        "Successfully imported 1 workflow."
+      ],
+      "log_bytes": 58,
+      "log_sha256": "41ff4600d6b83e86a4b8a8ceab04f6bb9348d873f4b61471a4eb6cf07581903c"
+    },
+    "dns": {
+      "markers": [
+        "Importing 1 workflows...",
+        "Successfully imported 1 workflow."
+      ],
+      "log_bytes": 58,
+      "log_sha256": "41ff4600d6b83e86a4b8a8ceab04f6bb9348d873f4b61471a4eb6cf07581903c"
+    },
+    "timeout": {
+      "markers": [
+        "Importing 1 workflows...",
+        "Successfully imported 1 workflow."
+      ],
+      "log_bytes": 58,
+      "log_sha256": "41ff4600d6b83e86a4b8a8ceab04f6bb9348d873f4b61471a4eb6cf07581903c"
+    },
+    "http500": {
+      "markers": [
+        "Importing 1 workflows...",
+        "Successfully imported 1 workflow."
+      ],
+      "log_bytes": 58,
+      "log_sha256": "41ff4600d6b83e86a4b8a8ceab04f6bb9348d873f4b61471a4eb6cf07581903c"
+    },
+    "http503": {
+      "markers": [
+        "Importing 1 workflows...",
+        "Successfully imported 1 workflow."
+      ],
+      "log_bytes": 58,
+      "log_sha256": "41ff4600d6b83e86a4b8a8ceab04f6bb9348d873f4b61471a4eb6cf07581903c"
+    },
+    "malformed": {
+      "markers": [
+        "Importing 1 workflows...",
+        "Successfully imported 1 workflow."
+      ],
+      "log_bytes": 58,
+      "log_sha256": "41ff4600d6b83e86a4b8a8ceab04f6bb9348d873f4b61471a4eb6cf07581903c"
+    },
+    "prior_red_body": {
+      "markers": [
+        "Importing 1 workflows...",
+        "Successfully imported 1 workflow."
+      ],
+      "log_bytes": 58,
+      "log_sha256": "41ff4600d6b83e86a4b8a8ceab04f6bb9348d873f4b61471a4eb6cf07581903c"
+    },
+    "recovery": {
+      "markers": [
+        "Importing 1 workflows...",
+        "Successfully imported 1 workflow."
+      ],
+      "log_bytes": 58,
+      "log_sha256": "41ff4600d6b83e86a4b8a8ceab04f6bb9348d873f4b61471a4eb6cf07581903c"
+    },
+    "mock_retry": {
+      "markers": [
+        "Importing 1 workflows...",
+        "Successfully imported 1 workflow."
+      ],
+      "log_bytes": 58,
+      "log_sha256": "41ff4600d6b83e86a4b8a8ceab04f6bb9348d873f4b61471a4eb6cf07581903c"
+    },
+    "mock_unknown": {
+      "markers": [
+        "Importing 1 workflows...",
+        "Successfully imported 1 workflow."
+      ],
+      "log_bytes": 58,
+      "log_sha256": "41ff4600d6b83e86a4b8a8ceab04f6bb9348d873f4b61471a4eb6cf07581903c"
+    },
+    "mock_green": {
+      "markers": [
+        "Importing 1 workflows...",
+        "Successfully imported 1 workflow."
+      ],
+      "log_bytes": 58,
+      "log_sha256": "41ff4600d6b83e86a4b8a8ceab04f6bb9348d873f4b61471a4eb6cf07581903c"
+    },
+    "mock_slack_failure": {
+      "markers": [
+        "Importing 1 workflows...",
+        "Successfully imported 1 workflow."
+      ],
+      "log_bytes": 58,
+      "log_sha256": "41ff4600d6b83e86a4b8a8ceab04f6bb9348d873f4b61471a4eb6cf07581903c"
+    },
+    "mock_gmail_failure": {
+      "markers": [
+        "Importing 1 workflows...",
+        "Successfully imported 1 workflow."
+      ],
+      "log_bytes": 58,
+      "log_sha256": "41ff4600d6b83e86a4b8a8ceab04f6bb9348d873f4b61471a4eb6cf07581903c"
+    },
+    "mock_slack_rejected": {
+      "markers": [
+        "Importing 1 workflows...",
+        "Successfully imported 1 workflow."
+      ],
+      "log_bytes": 58,
+      "log_sha256": "41ff4600d6b83e86a4b8a8ceab04f6bb9348d873f4b61471a4eb6cf07581903c"
+    },
+    "mock_gmail_rejected": {
+      "markers": [
+        "Importing 1 workflows...",
+        "Successfully imported 1 workflow."
+      ],
+      "log_bytes": 58,
+      "log_sha256": "41ff4600d6b83e86a4b8a8ceab04f6bb9348d873f4b61471a4eb6cf07581903c"
+    },
+    "mock_gmail_disabled": {
+      "markers": [
+        "Importing 1 workflows...",
+        "Successfully imported 1 workflow."
+      ],
+      "log_bytes": 58,
+      "log_sha256": "41ff4600d6b83e86a4b8a8ceab04f6bb9348d873f4b61471a4eb6cf07581903c"
+    }
+  },
+  "public_workflow_import": "PASS",
+  "public_workflow_sha256": "1f1b1a4f3c3431c9c79dfcf0f98cae01fc29682f1fb71165f214540ffe2ba52b",
+  "recovered_health": {
+    "status": "READY",
+    "model_version": "UE-23c30780e69023fb",
+    "model_loaded": true,
+    "threshold_loaded": true,
+    "runtime_status": "READY"
+  },
+  "import_diagnostic": {
+    "markers": [
+      "Importing 1 workflows...",
+      "Successfully imported 1 workflow."
+    ],
+    "log_bytes": 58,
+    "log_sha256": "41ff4600d6b83e86a4b8a8ceab04f6bb9348d873f4b61471a4eb6cf07581903c"
+  },
+  "cleanup": {
+    "result": "PASS",
+    "errors": []
+  }
+}

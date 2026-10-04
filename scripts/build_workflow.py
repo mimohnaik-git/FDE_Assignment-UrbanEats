@@ -1,4 +1,5 @@
-"""Build the 22-node inactive Phase-3B orchestration export from reviewed JS."""
+"""Build the 23-node inactive Phase-3C orchestration export from reviewed JS."""
+import argparse
 import json
 from pathlib import Path
 
@@ -80,17 +81,20 @@ return [{json:normalizeNotification($json,$('Settings').first().json,$execution,
         "options": {"createIfNotExists": False}}, 1.1, onError="continueRegularOutput")
     code("Prepare Audit and Gate", "return [{json:prepareNotificationClaim($json,$('Normalize Response').last().json,new Date().toISOString())}];")
     audit("Persist Prepared Audit")
-    boolean("Duplicate and TEST_MODE Gate", "={{ !$json.duplicate_suppression && !$json.test_mode && $json.slack_delivery_state === 'PENDING' && $json.gmail_delivery_state === 'PENDING' }}")
+    boolean("Duplicate and TEST_MODE Gate", "={{ !$json.duplicate_suppression && !$json.test_mode && $json.gmail_delivery_state === 'PENDING' }}")
+    boolean("Slack Required", "={{ JSON.parse($json.evidence_json).packet.channel_policy.slack }}")
     add("Slack", "slack", {"resource": "message", "operation": "post", "select": "channel",
         "channelId": {"__rl": True, "mode": "id", "value": "CONFIGURE_LOCALLY"},
-        "text": "={{ JSON.parse($json.evidence_json).packet.text }}", "otherOptions": {}},
+        "text": "={{ JSON.parse($json.evidence_json).packet.slack_text }}", "otherOptions": {"includeLinkToWorkflow": False}},
         2.3, disabled=True, retryOnFail=False, onError="continueRegularOutput")
     add("Gmail", "gmail", {"resource": "message", "operation": "send", "sendTo": "CONFIGURE_LOCALLY",
         "subject": "={{ JSON.parse($json.evidence_json).packet.subject }}", "emailType": "text",
-        "message": "={{ JSON.parse($json.evidence_json).packet.text }}", "options": {}},
+        "message": "={{ JSON.parse($json.evidence_json).packet.gmail_text }}", "options": {}},
         2.1, disabled=True, retryOnFail=False, onError="continueRegularOutput")
     code("Parse Receipts", """
 const initial=$('Persist Prepared Audit').first().json;
+if($prevNode.name==='Slack Required')
+ return [{json:notificationReceipt(initial,'slack',{},0,new Date().toISOString())}];
 if($prevNode.name==='Duplicate and TEST_MODE Gate')
  return ['slack','gmail'].map(channel=>({json:notificationReceipt(initial,channel,{},0,new Date().toISOString())}));
 const channel=$prevNode.name==='Slack' ? 'slack' : $prevNode.name==='Gmail' ? 'gmail' : null;
@@ -125,17 +129,27 @@ return [{json:notificationReceipt(initial,channel,$json,count,new Date().toISOSt
         link(a, b)
     link("Retry API", "Claim Run", 1)
     link("Duplicate and TEST_MODE Gate", "Parse Receipts", 1)
+    link("Duplicate and TEST_MODE Gate", "Slack Required")
+    link("Slack Required", "Slack")
+    link("Slack Required", "Parse Receipts", 1)
     link("Retry Delivery", "Completed Channel", 1)
     for index, channel in enumerate(["Slack", "Gmail"]):
-        link("Duplicate and TEST_MODE Gate", channel)
+        if channel == "Gmail":
+            link("Duplicate and TEST_MODE Gate", channel)
         link(channel, "Parse Receipts")
         link("Retry Channel", channel, index)
         link("Completed Channel", "Merge Channel Results", index, index)
-    workflow = {"name": "UrbanEats Phase 3B - unified inactive orchestration", "active": False,
+    workflow = {"name": "UrbanEats Phase 3C - channel policy and grounded briefing", "active": False,
                 "nodes": nodes, "connections": connections,
                 "settings": {"timezone": "Asia/Kolkata", "executionOrder": "v1"}, "pinData": {}}
     WORKFLOW.write_text(json.dumps(workflow, indent=2), encoding="utf-8")
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", type=Path, help="Build elsewhere to check equality without replacing the canonical export")
+    args = parser.parse_args()
+    if args.output is not None:
+        WORKFLOW = args.output
+        WORKFLOW.parent.mkdir(parents=True, exist_ok=True)
     build()

@@ -1,4 +1,5 @@
 """Bounded public-file secret/identifier scan; never emit matching values."""
+import argparse
 import json
 import re
 from pathlib import Path
@@ -16,7 +17,7 @@ PATTERNS = {
 }
 
 
-def main():
+def main(output=None):
     findings = []
     files = []
     for file in ROOT.rglob("*"):
@@ -48,11 +49,15 @@ def main():
     report = {"scope": "current public text and workflow metadata; excludes local runs/environment",
               "files_scanned": len(files), "findings": findings,
               "historical_exposure": "Baseline Git history and read-only backup still contain original identifiers"}
-    (ROOT / "evaluation/results/security_scan.json").write_text(json.dumps(report, indent=2))
+    target = Path(output) if output is not None else ROOT / "evaluation/results/security_scan.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(report, indent=2))
     print(json.dumps(report, indent=2))
     if findings:
         raise SystemExit(1)
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", type=Path, help="Preserve historical scan evidence by choosing a new output")
+    main(parser.parse_args().output)

@@ -1,6 +1,6 @@
 {
   "scope": "current public text and workflow metadata; excludes local runs/environment",
-  "files_scanned": 86,
+  "files_scanned": 101,
   "findings": [],
   "historical_exposure": "Baseline Git history and read-only backup still contain original identifiers"
 }

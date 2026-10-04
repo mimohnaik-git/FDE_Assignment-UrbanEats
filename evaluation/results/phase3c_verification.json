@@ -1,0 +1,65 @@
+{
+  "phase": "3C",
+  "pytest": {
+    "passed": 115,
+    "warnings": 2
+  },
+  "ruff": "PASS",
+  "git_diff_check": "PASS",
+  "native": {
+    "version": "2.41.6",
+    "import": "PASS",
+    "executions": 23,
+    "result": "PASS"
+  },
+  "docker_health": {
+    "status": "READY",
+    "model_version": "UE-23c30780e69023fb",
+    "model_loaded": true,
+    "threshold_loaded": true,
+    "runtime_status": "READY"
+  },
+  "workflow": {
+    "path": "workflows/n8n/urbaneats_live.json",
+    "nodes": 23,
+    "active": false,
+    "test_mode": true,
+    "credentials_bound": false,
+    "slack_gmail_disabled": true,
+    "schedule": "07:30 Asia/Kolkata"
+  },
+  "protected_hashes_unchanged": 19,
+  "dependencies_changed": false,
+  "security_findings": 0,
+  "remaining_live_checks": "Groq model/account compatibility and real channel receipts require separately authorized credential testing",
+  "external_activity": "No provider/channel calls. Initial failed Docker registry metadata lookup; corrected build uses local base offline.",
+  "recommendation": "READY FOR GROQ CREDENTIAL TEST",
+  "files_changed": [
+    ".env.example",
+    "AUDIT.md",
+    "README.md",
+    "docker/compose.yaml",
+    "docs/LIVE_AUTOMATION.md",
+    "docs/PHASE3B_REPORT.md",
+    "docs/REMEDIATION_PLAN.md",
+    "docs/RUNTIME.md",
+    "evaluation/results/security_scan.json",
+    "scripts/build_workflow.py",
+    "scripts/verify_notification_integration.py",
+    "src/urbaneats/briefing.py",
+    "src/urbaneats/provider.py",
+    "src/urbaneats/service.py",
+    "tests/test_live.py",
+    "tests/test_notification.py",
+    "tests/test_runtime.py",
+    "workflows/n8n/README.md",
+    "workflows/n8n/notification_logic.cjs",
+    "workflows/n8n/urbaneats_live.json",
+    "docs/PHASE3C_REPORT.md",
+    "evaluation/results/phase3c_native_verification.json",
+    "evaluation/results/phase3c_protected.json",
+    "evaluation/results/phase3c_verification.json",
+    "src/urbaneats/presentation.py",
+    "tests/test_phase3c.py"
+  ]
+}

@@ -14,6 +14,7 @@ from .hotspots import aggregate_hotspots
 from .inference import infer
 from .metrics import current_metrics
 from .model import load_artifact
+from .presentation import channel_messages
 from .provider import configured_provider
 from .run_logging import persist_run
 from .validation import utc_now, validate_batch
@@ -134,9 +135,6 @@ class Runtime:
                     hotspots=groups,
                     evidence=packet,
                     briefing=briefing,
-                )
-
-                result.update(
                     model_version=metadata["model_version"],
                     threshold=threshold["probability_threshold"],
                 )
@@ -195,9 +193,9 @@ class Runtime:
                 fact["predicted_risk_fraction"] = fact["predicted_risk_rate"]
 
         header = (
-            "RED_ALERT — manual review required"
+            "RED_ALERT - manual review required"
             if result["routing_status"] == "RED_ALERT"
-            else "GREEN_SUMMARY — no supported predicted-risk hotspot detected"
+            else "GREEN_SUMMARY - no supported predicted-risk hotspot detected"
             if result["routing_status"] == "GREEN_SUMMARY"
             else "DATA_FAILURE"
         )
@@ -209,7 +207,10 @@ class Runtime:
             + f"\nRun: {run_id}; batch: {result['source_batch_id']}; "
             f"records evaluated: {len(result['predictions'])}; model: {result['model_version']}; "
             "evidence: " + ", ".join(f["evidence_id"] for f in packet["facts"])
+            + f" [evidence:{packet['facts'][0]['evidence_id']}]"
         )
+
+        result["briefing"]["channels"] = channel_messages(result)
 
         try:
             persist_run(self.config.runs_dir, result, started, utc_now().isoformat())
@@ -229,7 +230,7 @@ class Runtime:
                 approved_action_ids=["CHECK_DATA"],
                 approved_actions=[ACTION_CATALOG["CHECK_DATA"]],
             )
-            return dict(
+            failed = dict(
                 result,
                 status="DATA_FAILURE",
                 routing_status="DATA_FAILURE",
@@ -239,6 +240,8 @@ class Runtime:
                     "formatter": {"mode": "deterministic"},
                 },
             )
+            failed["briefing"]["channels"] = channel_messages(failed)
+            return failed
 
         return result
 
@@ -294,7 +297,7 @@ def create_app(config=None, provider=None):
 
     @app.post("/process-current")
     def process_current():
-        """n8n scaffold re-reads a configured local source each scheduled execution."""
+        """Read the configured placement source afresh for each execution."""
 
         try:
             payload = json.loads(runtime.config.source_file.read_text(encoding="utf-8"))

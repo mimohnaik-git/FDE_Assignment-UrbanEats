@@ -18,6 +18,12 @@ where = ["src"]
 [tool.pytest.ini_options]
 pythonpath = ["src", "."]
 testpaths = ["tests"]
+filterwarnings = [
+    # Upstream compatibility warnings in the accepted dependency baseline only.
+    # \x3a matches SciPy's colon without becoming a pytest filter separator.
+    'ignore:^Using `httpx` with `starlette\.testclient` is deprecated; install `httpx2` instead\.$:starlette.exceptions.StarletteDeprecationWarning:^fastapi\.testclient$',
+    'ignore:^scipy\.optimize\x3a The `disp` and `iprint` options of the L-BFGS-B solver are deprecated and will be removed in SciPy 1\.18\.0\.$:DeprecationWarning:^sklearn\.linear_model\._logistic$',
+]
 
 [tool.ruff]
 extend-exclude = ["UrbanEats_classifier_langchain.ipynb", "UrbanEats_profiling_gx.ipynb", "notebooks/original"]

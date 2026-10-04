@@ -1,7 +1,7 @@
-# Current automation — 22-node Phase 3B
+# Current automation - 23-node
 
 Canonical export: workflows/n8n/urbaneats_live.json. n8n Community Edition 2.41.6 is pinned
-by digest in Compose and native verification. The accepted architecture has two triggers,
+by digest in Compose and native verification. The current architecture has two triggers,
 one Slack send node, one Gmail send node and shared normalization, claims, receipts and
 audit. It stays inactive, credential-unbound and TEST_MODE=true at 07:30 Asia/Kolkata.
 
@@ -14,7 +14,7 @@ It remains exploratory, uncalibrated and conditional Delivered-vs-Cancelled.
 Schedule/Manual → Settings → API → Normalize Response/unified packet → bounded retry →
 Claim Run → prepare/persist audit → duplicate/TEST_MODE gate → Slack/Gmail → parse receipts →
 persist delivery audit → bounded retry/channel routing → merged completion audit.
-[Phase 3B report](PHASE3B_REPORT.md) explains all 22 nodes and the six beyond the 16-node aim.
+[Phase 3C report](PHASE3C_REPORT.md) explains the policy gate: 22 → 23 nodes, below the 24-node limit.
 
 Valid API DATA_FAILURE/GREEN_SUMMARY/RED_ALERT preserve the API brief/evidence verbatim.
 An unavailable/malformed API response generates deterministic orchestration DATA_FAILURE
@@ -75,17 +75,16 @@ container as a cleanup step. No network/account configuration changes were made 
    prepared/channel/completion audit, and native Data Table. Stale source correctly fails.
 5. Use the native verifier below for isolated healthy/GREEN/RED/data failure/outage/malformed,
    duplicate, rate-limit and ambiguous-receipt checks without editing the current source.
-6. Preserve claims and TEST_MODE settings after testing. Credential setup, channel-policy
-   changes, provider-specific changes and activation require subsequent authorized work.
+6. Preserve claims and TEST_MODE settings after testing. Credential setup, live provider/credential calls and activation require subsequent authorized work.
 
 ## Reproducible local verification
 
 ```powershell
-.venv\Scripts\python.exe scripts/build_workflow.py
+.venv\Scripts\python.exe scripts/build_workflow.py --output docker/local/remediation/builder_check.json
 .venv\Scripts\python.exe -m pytest -q --basetemp=.pytest_tmp_checks
-ruff check .
-.venv\Scripts\python.exe scripts/security_scan.py
-.venv\Scripts\python.exe scripts/verify_notification_integration.py
+.venv\Scripts\python.exe -m ruff check .
+.venv\Scripts\python.exe scripts/security_scan.py --output docker/local/checks/security_scan.json
+.venv\Scripts\python.exe scripts/verify_notification_integration.py --output docker/local/checks/native_verification.json
 ```
 
 The verifier imports the public node graph with a temporary CLI-only workflow ID, since
@@ -94,5 +93,70 @@ CLI initialization enables the same native backend modules as n8n start; Data Ta
 is real isolated SQLite. TEST_MODE=false tests replace both send nodes with local Code
 mocks. It stops only the API for outage verification and restores it in finally. It never
 mounts n8n_data, changes the owner's account, mutates datasets, calls a hosted provider or
-sends notifications. Current results: evaluation/results/phase3b1_native_verification.json.
+sends notifications. Final verification: evaluation/results/final_native_verification.json. Historical phase results remain unchanged.
 Earlier automation instructions are preserved only in [history](history/README.md).
+
+## Channel policy and presentation
+
+| Status | Slack | Gmail |
+|---|---|---|
+| GREEN_SUMMARY | SKIPPED_POLICY, zero attempts | Required |
+| RED_ALERT | Required | Required |
+| DATA_FAILURE, including independent outage | Required | Required |
+
+Policy skips take precedence for an unrequired Slack channel, including TEST_MODE and
+repeated GREEN runs. Required channels distinguish SKIPPED_TEST_MODE and DUPLICATE_SUPPRESSED.
+SUCCESS/FAILURE/UNKNOWN remain independent, and policy skip is never failure. One additional
+Slack Required gate reuses the shared receipt/audit path; no per-status send branches exist.
+
+The API adds briefing.channels presentation fields outside the evidence schema. Slack RED
+contains supported hotspot fractions, approved actions and citations/provenance; GREEN has
+no Slack message. Gmail retains fuller batch/support/evidence content with subject, source,
+run/batch/model/timestamp and the explicit exploratory model limitation. DATA_FAILURE has
+stage/category, system review, provenance and failure citation; orchestration outage uses
+its independent deterministic brief without invented model evidence. No email dumps raw JSON.
+
+## Groq preparation — no live request authorized here
+
+Set LLM_PROVIDER=groq only for later authorized local configuration. GROQ_API_KEY is read
+only from the environment (ignored .env); GROQ_BASE_URL supplies the HTTPS compatible API
+prefix, and GROQ_MODEL supplies the locally chosen model. Docker passes these variables;
+all defaults are empty. Groq never falls back to LLM_API_KEY. Do not put secrets in workflow,
+docs/tests/results, or change TEST_MODE in this phase. No provider dependency was added.
+
+The formatter receives canonical evidence/actions, routing and provenance plus deterministic
+briefing. Its strict JSON items must copy canonical sentences with exact [evidence:ID]
+citations and approved action IDs. It may reorder them; arbitrary rephrasing or causal advice
+is deliberately disallowed. Required batch/supported-hotspot citations cannot be dropped.
+Routing/provenance/model-language is system-rendered, never provider-controlled. Invalid,
+empty, unavailable or malformed output uses deterministic fallback and retains valid routing
+and notification delivery. TEST_MODE blocks hosted transport even when configuration exists.
+
+For GPT-OSS strict-schema request details, safe fallback diagnostics and portable message
+text, see [Phase 3C.1 repair](PHASE3C1_REPORT.md). No further live call is authorized by that report.
+
+## Receipt reconciliation
+
+Slack node 2.3 success requires ok:true, a non-empty channel, and a non-empty
+message_timestamp (or message.ts fallback). Top-level ts alone is unverified.
+A disabled send node's exact unchanged upstream audit object is not a send receipt,
+including its Data Table row id: attempts stay zero, state UNKNOWN, category
+CHANNEL_NOT_SENT, event delivery_not_sent. This preserves existing channel states.
+Required UNKNOWN channels produce notification_unverified; terminal verified failures
+produce notification_failed; successful/intentional-skip outcomes retain notification_complete.
+Claims remain held and ambiguous/unverified outcomes never retry automatically.
+Slack otherOptions.includeLinkToWorkflow=false disables supported n8n attribution.
+See [Phase 3C.3 report](PHASE3C3_REPORT.md). No live sends are authorized by this documentation.
+
+## Final accepted verification
+
+148 pytest cases pass with zero warnings. The unchanged canonical 23-node graph imported
+and executed GREEN_SUMMARY, RED_ALERT and DATA_FAILURE in disposable isolated n8n state.
+TEST_MODE=true kept required channels SKIPPED_TEST_MODE; GREEN Slack was SKIPPED_POLICY.
+DATA_FAILURE stopped after three HTTP 503 attempts; every run completed without delivery
+errors. [Execution evidence](../evaluation/results/final_n8n_execution_verification.json)
+and [pre-freeze audit](PREFREEZE_AUDIT.md) supersede historical phase counts.
+Model `UE-23c30780e69023fb` remains exploratory, uncalibrated and conditional; no production
+claim follows from transport verification. Credentials stay in ignored private configuration
+or local n8n bindings and must never enter Git. Existing final evidence must not be overwritten
+by repeat checks; use a new local output path.

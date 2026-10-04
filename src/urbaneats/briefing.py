@@ -1,12 +1,19 @@
 import json
 import re
-from typing import Protocol
+
+MODEL_LIMITATION = (
+    "exploratory, uncalibrated, conditional Delivered-vs-Cancelled model; no production-quality claim"
+)
 
 
-class FormatterProvider(Protocol):
-    """Injectable formatter interface; hosted transport is optional."""
+class ProviderFailure(ValueError):
+    """Allowlisted public category, never provider response or exception details."""
 
-    def generate(self, evidence: dict) -> dict: ...
+    def __init__(self, category):
+        self.category = category if category in {
+            "PROVIDER_HTTP_FAILED", "PROVIDER_TRANSPORT_FAILED", "PROVIDER_RESPONSE_MALFORMED",
+        } else "PROVIDER_UNAVAILABLE"
+        super().__init__(self.category)
 
 
 def fact_sentences(packet):
@@ -40,10 +47,12 @@ def validate_citations(text, packet):
     valid = {f["evidence_id"] for f in packet["facts"]}
 
     cited = re.findall(r"\[evidence:([^\]]+)\]", text)
+    required = required_evidence_ids(packet)
 
     return (
         bool(cited)
         and set(cited) <= valid
+        and required <= set(cited)
         and (
             f"[run:{packet['run_id']}]" in text
             and f"[source:{packet['source_batch_id']}]" in text
@@ -54,17 +63,14 @@ def validate_citations(text, packet):
 
 
 def validate_formatter_output(output, packet):
-    """Conservative structured formatter: reorder/select canonical sentences only.
+    """Accept canonical evidence sentences only with their exact citation.
 
-
-
-    Arbitrary prose cannot be made safe by a numeric/citation regex. Phase 2 therefore
-
-    permits no free-form additions; Phase 3 can extend this under factual validation.
-
+    Provenance/routing/model text is system-rendered. No free-form metric, action,
+    causal statement or model-readiness claim can pass this closed vocabulary.
     """
 
-    if not isinstance(output, dict) or set(output) != {"items"} or not output["items"]:
+    if (not isinstance(output, dict) or set(output) != {"items"}
+            or not isinstance(output["items"], list) or not output["items"]):
         raise ValueError("Invalid formatter schema")
 
     sentences = fact_sentences(packet)
@@ -77,7 +83,7 @@ def validate_formatter_output(output, packet):
 
         eid = item["evidence_id"]
 
-        if eid not in sentences or eid in seen or item["text"] != sentences[eid]:
+        if eid not in sentences or eid in seen or item["text"] != sentences[eid] + f" [evidence:{eid}]":
             raise ValueError("Unsupported evidence or wording")
 
         seen.add(eid)
@@ -87,7 +93,7 @@ def validate_formatter_output(output, packet):
         if item["action_ids"] != fact["approved_action_ids"]:
             raise ValueError("Unsupported actions")
 
-    required = {"KPI-BATCH"} | {f["evidence_id"] for f in packet["facts"] if f.get("is_hotspot")}
+    required = required_evidence_ids(packet)
 
     if not required <= seen:
         raise ValueError("Required evidence omitted")
@@ -95,21 +101,44 @@ def validate_formatter_output(output, packet):
     return output
 
 
+def cited_line(text, evidence_id):
+    """Join a rendered sentence and its citation with exactly one separating space."""
+    return f"{text.rstrip()} [evidence:{evidence_id}]"
+
+
+def required_evidence_ids(packet):
+    """Batch and supported hotspots must survive formatting and rendering."""
+    return {"KPI-BATCH"} | {f["evidence_id"] for f in packet["facts"] if f.get("is_hotspot")}
+
+
+def canonical_items(packet):
+    """Construct the same closed vocabulary for local and hosted formatting."""
+    sentences = fact_sentences(packet)
+    return [
+        {"evidence_id": f["evidence_id"],
+         "text": cited_line(sentences[f["evidence_id"]], f["evidence_id"]),
+         "action_ids": f["approved_action_ids"]}
+        for f in packet["facts"]
+    ]
+
+
 def render(packet, items):
 
     lines = [
-        f"UrbanEats — {packet['source_mode']} — exploratory conditional model",
+        f"UrbanEats - {packet['source_mode']} - exploratory conditional model",
         f"[run:{packet['run_id']}] [source:{packet['source_batch_id']}]",
         "Observed cancellation metrics unavailable for this placement batch.",
+        cited_line(f"{MODEL_LIMITATION}.", "KPI-BATCH"),
     ]
 
     for item in items:
-        lines.append(f"{item['text']} [evidence:{item['evidence_id']}]")
+        citation = f"[evidence:{item['evidence_id']}]"
+        lines.append(item["text"] if item["text"].endswith(citation) else f"{item['text']} {citation}")
 
         for aid in item["action_ids"]:
             action = next(a for a in packet["approved_actions"] if a["action_id"] == aid)
 
-            lines.append(f"Action {aid}: {action['description']} [evidence:{item['evidence_id']}]")
+            lines.append(cited_line(f"Action {aid}: {action['description']}", item["evidence_id"]))
 
     text = "\n".join(lines)
 
@@ -120,17 +149,7 @@ def render(packet, items):
 
 
 def generate_briefing(packet, provider=None):
-
-    sentences = fact_sentences(packet)
-
-    items = [
-        {
-            "evidence_id": f["evidence_id"],
-            "text": sentences[f["evidence_id"]],
-            "action_ids": f["approved_action_ids"],
-        }
-        for f in packet["facts"]
-    ]
+    items = canonical_items(packet)
 
     trace = {"mode": "deterministic", "provider_status": "NOT_CONFIGURED"}
 
@@ -138,17 +157,19 @@ def generate_briefing(packet, provider=None):
         try:
             # Detached copy prevents a provider mutating pipeline truth.
 
+            category = "PROVIDER_UNAVAILABLE"
             output = provider.generate(json.loads(json.dumps(packet)))
 
+            category = "PROVIDER_OUTPUT_REJECTED"
             items = validate_formatter_output(output, packet)["items"]
 
             trace = {"mode": "provider", "provider_status": "VALIDATED"}
 
-        except Exception:
+        except Exception as exc:
             trace = {
                 "mode": "deterministic",
                 "provider_status": "FALLBACK",
-                "reason": "provider_unavailable_or_output_rejected",
+                "reason": exc.category if isinstance(exc, ProviderFailure) else category,
             }
 
     trace.update(

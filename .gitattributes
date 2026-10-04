@@ -1,0 +1,41 @@
+* text=auto eol=lf
+
+*.py text eol=lf
+*.cjs text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+*.toml text eol=lf
+*.txt text eol=lf
+*.csv text eol=lf
+.env.example text eol=lf
+.gitattributes text eol=lf
+Dockerfile text eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pkl binary
+*.joblib binary
+*.sqlite binary
+*.db binary
+
+# Raw SHA256 integrity and frozen evidence: preserve bytes, including CRLF.
+# These exceptions override the source-text EOL rules above.
+artifacts/model/** -text !eol whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+evaluation/results/** -text !eol whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+urbaneats_delivery_orders.csv -text !eol whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+urbaneats_delivery_orders_scored.csv -text !eol whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+urbaneats_alerts.json -text !eol whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+urbaneats_ops_brief.md -text !eol whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+UrbanEats_n8n_workflow.json -text !eol whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+UrbanEats_classifier_langchain.ipynb -text !eol whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+UrbanEats_profiling_gx.ipynb -text !eol whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+workflows/n8n/urbaneats_live.json -text !eol whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+workflows/n8n/history/** -text !eol whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+docs/PHASE3*_REPORT.md -text !eol whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+docs/CLEANUP_REPORT.md -text !eol whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+docs/history/** -text !eol whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
